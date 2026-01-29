@@ -9,10 +9,16 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
+    "file-saver": "^2.0.5",
     "firebase": "^12.8.0",
+    "firebase-functions": "^7.0.5",
+    "leaflet": "^1.9.4",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "react-leaflet": "^5.0.0",
+    "resend": "^6.9.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
