@@ -76,14 +76,13 @@ export default function MartaInventory() {
     }
   }, [user, isApproved, isAdmin]);
 
-  // Admin Only: Clear Entire History
   const clearHistory = async () => {
-    if (!window.confirm("ARE YOU SURE? This will permanently delete all maintenance logs.")) return;
+    if (!window.confirm("ERASE ALL LOGS? This cannot be undone.")) return;
     const batch = writeBatch(db);
     const snap = await getDocs(collection(db, "history"));
     snap.docs.forEach((d) => batch.delete(d.ref));
     await batch.commit();
-    alert("History cleared.");
+    alert("History Purged.");
   };
 
   const sortedBuses = [...buses]
@@ -101,15 +100,18 @@ export default function MartaInventory() {
       return 0; 
     });
 
+  // UPDATED: Styled Excel with Text Wrap & Timestamped Name
   const exportToExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('MARTA Fleet');
+    
     worksheet.columns = [
-      { header: 'Unit #', key: 'number', width: 15 },
-      { header: 'Status', key: 'status', width: 15 },
-      { header: 'Notes', key: 'notes', width: 50 },
-      { header: 'Tech', key: 'tech', width: 25 },
+      { header: 'Unit #', key: 'number', width: 12, style: { alignment: { horizontal: 'center' } } },
+      { header: 'Status', key: 'status', width: 15, style: { alignment: { horizontal: 'center' } } },
+      { header: 'Diagnostics/Notes', key: 'notes', width: 60, style: { alignment: { wrapText: true, vertical: 'top' } } }, // WRAP TEXT ADDED
+      { header: 'Modified By', key: 'tech', width: 25 },
     ];
+
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFF' } };
     worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '002D72' } };
 
@@ -120,16 +122,24 @@ export default function MartaInventory() {
         notes: bus.notes || '---',
         tech: bus.modifiedBy,
       });
+
       const statusCell = row.getCell('status');
       if (bus.status === 'Active') {
         statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'C6EFCE' } };
+        statusCell.font = { color: { argb: '006100' }, bold: true };
       } else if (bus.status === 'On Hold') {
         statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC7CE' } };
+        statusCell.font = { color: { argb: '9C0006' }, bold: true };
       }
     });
 
+    // GENERATE TIMESTAMPED FILENAME
+    const now = new Date();
+    const timestamp = `${now.getMonth() + 1}-${now.getDate()}-${now.getFullYear()}_${now.getHours() % 12 || 12}${now.getMinutes() < 10 ? '0' : ''}${now.getMinutes()}${now.getHours() >= 12 ? 'PM' : 'AM'}`;
+    const fileName = `MARTA_Fleet_${timestamp}.xlsx`;
+
     const buffer = await workbook.xlsx.writeBuffer();
-    saveAs(new Blob([buffer]), `MARTA_Report.xlsx`);
+    saveAs(new Blob([buffer]), fileName);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -176,7 +186,7 @@ export default function MartaInventory() {
     );
   }
 
-  if (!isApproved) return <div className="p-20 text-center font-black text-[#002d72] uppercase">Access Pending Approval</div>;
+  if (!isApproved) return <div className="p-20 text-center font-black text-[#002d72] uppercase">Access Pending</div>;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-20 font-sans">
@@ -199,19 +209,19 @@ export default function MartaInventory() {
           <>
             <div className="flex flex-wrap gap-4 mb-10">
               <div className="flex-1 bg-white p-4 rounded-xl shadow-sm border-b-4 border-[#002d72] min-w-[120px]"><p className="text-[9px] font-black text-slate-400 uppercase">Total</p><p className="text-xl font-black">{buses.length}</p></div>
-              <div className="flex-1 bg-white p-4 rounded-xl shadow-sm border-b-4 border-green-500 min-w-[120px]"><p className="text-[9px] font-black text-slate-400 uppercase">Ready</p><p className="text-xl font-black text-green-600 text-slate-900">{buses.filter(b=>b.status==='Active').length}</p></div>
+              <div className="flex-1 bg-white p-4 rounded-xl shadow-sm border-b-4 border-green-500 min-w-[120px]"><p className="text-[9px] font-black text-slate-400 uppercase">Ready</p><p className="text-xl font-black text-green-600">{buses.filter(b=>b.status==='Active').length}</p></div>
               <div className="flex-1 bg-white p-4 rounded-xl shadow-sm border-b-4 border-red-600 min-w-[120px]"><p className="text-[9px] font-black text-slate-400 uppercase">Hold</p><p className="text-xl font-black text-red-600">{buses.filter(b=>b.status==='On Hold').length}</p></div>
-              <div className="flex-1 bg-white p-4 rounded-xl shadow-sm border-b-4 border-amber-500 min-w-[120px]"><p className="text-[9px] font-black text-slate-400 uppercase">Shop</p><p className="text-xl font-black text-amber-600 text-slate-900">{buses.filter(b=>b.status==='In Shop').length}</p></div>
+              <div className="flex-1 bg-white p-4 rounded-xl shadow-sm border-b-4 border-amber-500 min-w-[120px]"><p className="text-[9px] font-black text-slate-400 uppercase">Shop</p><p className="text-xl font-black text-amber-600">{buses.filter(b=>b.status==='In Shop').length}</p></div>
             </div>
 
             <section className="bg-white p-6 rounded-2xl shadow-xl mb-12 border border-slate-200">
               <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <input type="text" placeholder="Unit #" maxLength={4} className="p-4 border-2 border-slate-100 rounded-xl font-black uppercase text-slate-900" value={busNumber} onChange={(e) => setBusNumber(e.target.value)} required />
+                <input type="text" placeholder="Unit #" maxLength={4} className="p-4 border-2 border-slate-100 rounded-xl font-black uppercase" value={busNumber} onChange={(e) => setBusNumber(e.target.value)} required />
                 <select className="p-4 border-2 border-slate-100 rounded-xl font-bold bg-slate-50 text-slate-900" value={status} onChange={(e) => setStatus(e.target.value)}>
                   <option value="Active">Ready</option><option value="On Hold">Hold</option><option value="In Shop">Shop</option>
                 </select>
                 <input type="text" placeholder="Diagnostics..." className="p-4 border-2 border-slate-100 rounded-xl text-slate-900" value={notes} onChange={(e) => setNotes(e.target.value)} />
-                <button type="submit" className="bg-[#ef7c00] text-white font-black py-4 rounded-xl shadow-lg uppercase">{editingId ? "Save" : "Update"}</button>
+                <button type="submit" className="bg-[#ef7c00] text-white font-black py-4 rounded-xl uppercase hover:bg-black transition-all shadow-lg">{editingId ? "Save" : "Update"}</button>
               </form>
             </section>
 
@@ -229,14 +239,14 @@ export default function MartaInventory() {
                   </button>
                 ))}
               </div>
-              <button onClick={exportToExcel} className="w-full md:w-auto bg-[#002d72] text-white px-6 py-4 rounded-xl font-black text-[10px] uppercase shadow-lg">Export</button>
+              <button onClick={exportToExcel} className="w-full md:w-auto bg-[#002d72] text-white px-6 py-4 rounded-xl font-black text-[10px] uppercase shadow-lg">Export Report</button>
             </div>
             
             <div className={viewMode === 'card' ? "grid grid-cols-1 md:grid-cols-3 gap-6" : "space-y-3"}>
               {sortedBuses.map((bus) => (
                 <div key={bus.docId} className={`bg-white p-4 rounded-xl shadow-sm border-l-8 transition-all hover:shadow-md ${bus.status === 'Active' ? 'border-green-500' : bus.status === 'On Hold' ? 'border-red-600' : 'border-amber-500'} ${viewMode === 'list' ? 'flex flex-col md:flex-row items-center justify-between' : ''}`}>
                   <div className="flex items-center gap-6">
-                    <span className="text-2xl font-black text-[#002d72] w-20 tracking-tighter">#{bus.number}</span>
+                    <span className="text-2xl font-black text-[#002d72] w-20 tracking-tighter font-black">#{bus.number}</span>
                     <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase min-w-[70px] text-center ${bus.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{bus.status === 'Active' ? 'Ready' : bus.status}</span>
                   </div>
                   <div className="flex-1 px-0 md:px-8 py-2 md:py-0 min-w-0">
@@ -253,47 +263,29 @@ export default function MartaInventory() {
         ) : activeTab === 'history' ? (
           <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 text-slate-900">
             <div className="flex justify-between items-center mb-8 border-b pb-4">
-                <h2 className="text-xl font-black text-[#002d72] uppercase tracking-widest italic">Maintenance Timeline</h2>
-                {/* Admin Only Clear Button */}
+                <h2 className="text-xl font-black text-[#002d72] uppercase tracking-widest italic">Timeline</h2>
                 {isAdmin && (
                     <button onClick={clearHistory} className="bg-red-600 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase hover:bg-black transition-all shadow-md">
-                        Clear History
+                        Clear Logs
                     </button>
                 )}
             </div>
-            
-            <div className="mb-6 flex flex-col md:flex-row gap-4 items-center">
-                <input type="text" placeholder="🔍 Search History Unit #..." className="flex-1 p-4 border-2 border-slate-200 rounded-xl shadow-sm outline-none font-bold" value={historySearchTerm} onChange={(e) => setHistorySearchTerm(e.target.value)} />
-                <select value={historySortKey} onChange={(e) => setHistorySortKey(e.target.value)} className="bg-slate-100 text-[10px] font-black uppercase px-6 py-4 rounded-xl outline-none text-[#002d72] shadow-sm">
-                    <option value="timestamp">Newest First</option>
-                    <option value="number">Unit #</option>
-                </select>
-            </div>
-
-            <div className="space-y-4">
-              {sortedHistory.slice(0, 100).map((log, i) => (
-                <div key={i} className="flex flex-col md:flex-row items-center justify-between p-4 bg-slate-50 rounded-xl border-l-4 border-slate-200 hover:shadow-md transition-all">
-                  <div className="flex items-center gap-6 w-full md:w-auto">
-                    <span className="text-lg font-black text-[#002d72] w-16 tracking-tighter font-black">#{log.number}</span>
-                    <span className={`text-[8px] font-black px-2 py-1 rounded-full uppercase ${log.action === 'NEW' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>{log.action}</span>
-                  </div>
-                  <div className="flex-1 px-0 md:px-8 py-2 md:py-0 w-full md:w-auto min-w-0">
-                    <p className="text-slate-400 text-[11px] font-medium italic break-all">"{log.notes || "---"}"</p>
-                  </div>
-                  <div className="text-right w-full md:w-auto">
-                    <span className="font-mono text-[9px] text-slate-300 block">{(log.timestamp?.toDate().toLocaleString())}</span>
-                    <span className="text-[8px] font-bold text-[#002d72] uppercase opacity-40 tracking-widest">{log.modifiedBy?.split('@')[0]}</span>
-                  </div>
+            <div className="space-y-3">
+              {history.slice(0, 50).map((log, i) => (
+                <div key={i} className="flex flex-col md:flex-row items-center justify-between p-4 bg-slate-50 rounded-xl border-l-4 border-slate-200">
+                  <span className="text-lg font-black text-[#002d72] w-16 tracking-tighter">#{log.number}</span>
+                  <p className="flex-1 px-4 text-slate-400 text-[10px] italic break-all">"{log.notes || "---"}"</p>
+                  <span className="font-mono text-[9px] text-slate-300">{(log.timestamp?.toDate().toLocaleString())}</span>
                 </div>
               ))}
             </div>
           </div>
         ) : (
           <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 text-slate-900">
-            <h2 className="text-xl font-black text-[#002d72] uppercase mb-8 tracking-widest border-b pb-4">Team Management</h2>
-            <div className="space-y-4">
+            <h2 className="text-xl font-black text-[#002d72] uppercase mb-8 tracking-widest border-b pb-4 text-slate-900">Team Control</h2>
+            <div className="space-y-4 text-slate-900">
               {allUsers.filter(u => u.email !== 'anetowestfield@gmail.com').map((member, i) => (
-                <div key={i} className="flex flex-col md:flex-row items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 gap-6 text-slate-900">
+                <div key={i} className="flex flex-col md:flex-row items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 gap-6">
                   <div className="flex flex-col flex-1">
                     <span className="font-black text-[#002d72] text-lg">{member.email}</span>
                     <p className="text-[9px] font-black uppercase text-slate-400">Role: {member.role || 'user'}</p>
