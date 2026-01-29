@@ -12,11 +12,9 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// THIS UPDATES THE BROWSER TAB NAME
 export const metadata: Metadata = {
-  title: "MARTA Fleet Portal",
-  description: "Official Inventory & Maintenance Tracking for MARTA Operations",
-  manifest: "/manifest.json", // Links to your PWA settings
+  title: "MARTA Fleet Operations",
+  description: "Fleet management dashboard",
 };
 
 export default function RootLayout({
@@ -26,12 +24,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
-        {/* Sets the color of the address bar on mobile phones */}
-        <meta name="theme-color" content="#002d72" /> 
-        <link rel="icon" href="/favicon.ico" />
-      </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        suppressHydrationWarning={true}
+      >
         {children}
       </body>
     </html>
