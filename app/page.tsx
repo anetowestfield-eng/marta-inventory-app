@@ -1,14 +1,23 @@
 "use client";
 import React, { useState, useEffect } from 'react';
 import { db, auth } from './firebaseConfig'; 
-import { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, serverTimestamp, updateDoc, getDoc, setDoc } from "firebase/firestore";
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, User } from "firebase/auth";
+import { 
+  collection, addDoc, onSnapshot, query, orderBy, 
+  deleteDoc, doc, serverTimestamp, updateDoc, getDoc, setDoc, getDocs, writeBatch 
+} from "firebase/firestore";
+import { 
+  onAuthStateChanged, signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, signOut, User 
+} from "firebase/auth";
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 
 export default function MartaInventory() {
   const [user, setUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState('fleet'); 
+  const [viewMode, setViewMode] = useState('list'); 
+  const [sortKey, setSortKey] = useState('timestamp'); 
+  const [historySortKey, setHistorySortKey] = useState('timestamp'); 
   const [isApproved, setIsApproved] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false); 
   const [email, setEmail] = useState('');
@@ -20,6 +29,7 @@ export default function MartaInventory() {
   const [allUsers, setAllUsers] = useState<any[]>([]);
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [historySearchTerm, setHistorySearchTerm] = useState(''); 
   const [busNumber, setBusNumber] = useState('');
   const [status, setStatus] = useState('Active');
   const [notes, setNotes] = useState('');
@@ -37,7 +47,11 @@ export default function MartaInventory() {
           setIsApproved(data.approved || currentUser.email === adminEmail);
           setIsAdmin(data.role === 'admin' || currentUser.email === adminEmail);
         } else if (currentUser.email === adminEmail) {
-          await setDoc(doc(db, "users", currentUser.uid), { email: currentUser.email, approved: true, role: 'admin' });
+          await setDoc(doc(db, "users", currentUser.uid), { 
+            email: currentUser.email, 
+            approved: true, 
+            role: 'admin' 
+          });
           setIsApproved(true);
           setIsAdmin(true);
         }
@@ -62,19 +76,44 @@ export default function MartaInventory() {
     }
   }, [user, isApproved, isAdmin]);
 
+  // Admin Only: Clear Entire History
+  const clearHistory = async () => {
+    if (!window.confirm("ARE YOU SURE? This will permanently delete all maintenance logs.")) return;
+    const batch = writeBatch(db);
+    const snap = await getDocs(collection(db, "history"));
+    snap.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+    alert("History cleared.");
+  };
+
+  const sortedBuses = [...buses]
+    .filter(b => b.number.includes(searchTerm.toUpperCase()))
+    .sort((a, b) => {
+      if (sortKey === 'number') return a.number.localeCompare(b.number);
+      if (sortKey === 'status') return a.status.localeCompare(b.status);
+      return 0; 
+    });
+
+  const sortedHistory = [...history]
+    .filter(h => h.number.includes(historySearchTerm.toUpperCase()))
+    .sort((a, b) => {
+      if (historySortKey === 'number') return a.number.localeCompare(b.number);
+      return 0; 
+    });
+
   const exportToExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('MARTA Fleet');
     worksheet.columns = [
       { header: 'Unit #', key: 'number', width: 15 },
       { header: 'Status', key: 'status', width: 15 },
-      { header: 'Diagnostics/Notes', key: 'notes', width: 50 },
-      { header: 'Last Updated By', key: 'tech', width: 25 },
+      { header: 'Notes', key: 'notes', width: 50 },
+      { header: 'Tech', key: 'tech', width: 25 },
     ];
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFF' } };
     worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '002D72' } };
 
-    buses.forEach(bus => {
+    sortedBuses.forEach(bus => {
       const row = worksheet.addRow({
         number: bus.number,
         status: bus.status.toUpperCase(),
@@ -84,13 +123,8 @@ export default function MartaInventory() {
       const statusCell = row.getCell('status');
       if (bus.status === 'Active') {
         statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'C6EFCE' } };
-        statusCell.font = { color: { argb: '006100' }, bold: true };
       } else if (bus.status === 'On Hold') {
         statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC7CE' } };
-        statusCell.font = { color: { argb: '9C0006' }, bold: true };
-      } else if (bus.status === 'In Shop') {
-        statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEB9C' } };
-        statusCell.font = { color: { argb: '9C6500' }, bold: true };
       }
     });
 
@@ -100,11 +134,14 @@ export default function MartaInventory() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!/^[a-zA-Z0-9]{4}$/.test(busNumber)) {
-      alert("Error: Unit # must be 4 characters.");
-      return;
-    }
-    const data = { number: busNumber.toUpperCase(), status, notes, modifiedBy: user?.email, timestamp: serverTimestamp() };
+    if (!/^[a-zA-Z0-9]{4}$/.test(busNumber)) return;
+    const data = { 
+      number: busNumber.toUpperCase(), 
+      status, 
+      notes, 
+      modifiedBy: user?.email, 
+      timestamp: serverTimestamp() 
+    };
     if (editingId) {
       await updateDoc(doc(db, "buses", editingId), data);
       await addDoc(collection(db, "history"), { ...data, action: "EDIT" });
@@ -133,13 +170,13 @@ export default function MartaInventory() {
           <input type="email" placeholder="Email" className="w-full p-4 border-2 rounded-xl mb-4 font-bold" value={email} onChange={(e) => setEmail(e.target.value)} required />
           <input type="password" placeholder="Password" className="w-full p-4 border-2 rounded-xl mb-6 font-bold" value={password} onChange={(e) => setPassword(e.target.value)} required />
           <button className="w-full bg-[#ef7c00] text-white font-black py-4 rounded-xl shadow-lg uppercase">{view}</button>
-          <button type="button" onClick={() => setView(view === 'login' ? 'signup' : 'login')} className="w-full mt-4 text-[10px] uppercase font-bold text-[#002d72] underline text-center block tracking-widest">Sign UP</button>
+          <button type="button" onClick={() => setView(view === 'login' ? 'signup' : 'login')} className="w-full mt-4 text-[10px] uppercase font-bold text-[#002d72] underline text-center block tracking-widest">Switch Mode</button>
         </form>
       </div>
     );
   }
 
-  if (!isApproved) return <div className="p-20 text-center font-black text-[#002d72] uppercase tracking-tighter">Yard Access Pending Approval</div>;
+  if (!isApproved) return <div className="p-20 text-center font-black text-[#002d72] uppercase">Access Pending Approval</div>;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-20 font-sans">
@@ -157,14 +194,14 @@ export default function MartaInventory() {
         <button onClick={() => signOut(auth)} className="text-[10px] bg-red-600 px-3 py-1 rounded font-bold uppercase">Logout</button>
       </nav>
 
-      <main className="max-w-5xl mx-auto p-4 md:p-10">
+      <main className="max-w-6xl mx-auto p-4 md:p-10">
         {activeTab === 'fleet' ? (
           <>
             <div className="flex flex-wrap gap-4 mb-10">
               <div className="flex-1 bg-white p-4 rounded-xl shadow-sm border-b-4 border-[#002d72] min-w-[120px]"><p className="text-[9px] font-black text-slate-400 uppercase">Total</p><p className="text-xl font-black">{buses.length}</p></div>
-              <div className="flex-1 bg-white p-4 rounded-xl shadow-sm border-b-4 border-green-500 min-w-[120px]"><p className="text-[9px] font-black text-slate-400 uppercase">Ready</p><p className="text-xl font-black text-green-600">{buses.filter(b=>b.status==='Active').length}</p></div>
+              <div className="flex-1 bg-white p-4 rounded-xl shadow-sm border-b-4 border-green-500 min-w-[120px]"><p className="text-[9px] font-black text-slate-400 uppercase">Ready</p><p className="text-xl font-black text-green-600 text-slate-900">{buses.filter(b=>b.status==='Active').length}</p></div>
               <div className="flex-1 bg-white p-4 rounded-xl shadow-sm border-b-4 border-red-600 min-w-[120px]"><p className="text-[9px] font-black text-slate-400 uppercase">Hold</p><p className="text-xl font-black text-red-600">{buses.filter(b=>b.status==='On Hold').length}</p></div>
-              <div className="flex-1 bg-white p-4 rounded-xl shadow-sm border-b-4 border-amber-500 min-w-[120px]"><p className="text-[9px] font-black text-slate-400 uppercase">Shop</p><p className="text-xl font-black text-amber-600">{buses.filter(b=>b.status==='In Shop').length}</p></div>
+              <div className="flex-1 bg-white p-4 rounded-xl shadow-sm border-b-4 border-amber-500 min-w-[120px]"><p className="text-[9px] font-black text-slate-400 uppercase">Shop</p><p className="text-xl font-black text-amber-600 text-slate-900">{buses.filter(b=>b.status==='In Shop').length}</p></div>
             </div>
 
             <section className="bg-white p-6 rounded-2xl shadow-xl mb-12 border border-slate-200">
@@ -178,60 +215,74 @@ export default function MartaInventory() {
               </form>
             </section>
 
-            <div className="mb-6 flex gap-4">
-              <input type="text" placeholder="🔍 Search Unit #..." className="flex-1 p-4 border-2 border-slate-200 rounded-xl shadow-sm outline-none text-slate-900 font-bold" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-              {/* THE FIX: Export button is now accessible to all approved users */}
-              <button onClick={exportToExcel} className="bg-[#002d72] text-white px-6 py-4 rounded-xl font-black text-[10px] uppercase shadow-lg hover:bg-black transition-all">
-                Export Excel
-              </button>
+            <div className="mb-6 flex flex-col md:flex-row gap-4 items-center">
+              <input type="text" placeholder="🔍 Search Unit #..." className="flex-1 p-4 border-2 border-slate-200 rounded-xl shadow-sm outline-none font-bold text-slate-900" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              <div className="flex bg-slate-200 p-1 rounded-xl w-full md:w-auto">
+                <select value={sortKey} onChange={(e) => setSortKey(e.target.value)} className="bg-transparent text-[10px] font-black uppercase px-4 outline-none text-[#002d72]">
+                    <option value="timestamp">Newest</option>
+                    <option value="number">Unit #</option>
+                    <option value="status">Status</option>
+                </select>
+                {['card', 'list', 'compact'].map((mode) => (
+                  <button key={mode} onClick={() => setViewMode(mode)} className={`flex-1 px-4 py-2 rounded-lg text-[10px] font-black uppercase ${viewMode === mode ? 'bg-white shadow-sm text-[#002d72]' : 'text-slate-400'}`}>
+                    {mode}
+                  </button>
+                ))}
+              </div>
+              <button onClick={exportToExcel} className="w-full md:w-auto bg-[#002d72] text-white px-6 py-4 rounded-xl font-black text-[10px] uppercase shadow-lg">Export</button>
             </div>
             
-            <div className="space-y-3">
-              {buses.filter(b => b.number.includes(searchTerm.toUpperCase())).map((bus) => (
-                <div key={bus.docId} className={`flex flex-col md:flex-row items-center justify-between bg-white p-4 rounded-xl shadow-sm border-l-8 ${bus.status === 'Active' ? 'border-green-500' : bus.status === 'On Hold' ? 'border-red-600' : 'border-amber-500'}`}>
-                  <div className="flex items-center gap-6 w-full md:w-auto">
+            <div className={viewMode === 'card' ? "grid grid-cols-1 md:grid-cols-3 gap-6" : "space-y-3"}>
+              {sortedBuses.map((bus) => (
+                <div key={bus.docId} className={`bg-white p-4 rounded-xl shadow-sm border-l-8 transition-all hover:shadow-md ${bus.status === 'Active' ? 'border-green-500' : bus.status === 'On Hold' ? 'border-red-600' : 'border-amber-500'} ${viewMode === 'list' ? 'flex flex-col md:flex-row items-center justify-between' : ''}`}>
+                  <div className="flex items-center gap-6">
                     <span className="text-2xl font-black text-[#002d72] w-20 tracking-tighter">#{bus.number}</span>
                     <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase min-w-[70px] text-center ${bus.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{bus.status === 'Active' ? 'Ready' : bus.status}</span>
                   </div>
-                  <div className="flex-1 px-0 md:px-8 py-2 md:py-0 w-full md:w-auto min-w-0 text-slate-900">
+                  <div className="flex-1 px-0 md:px-8 py-2 md:py-0 min-w-0">
                     <p className="text-slate-500 text-xs font-medium italic break-all">"{bus.notes || "---"}"</p>
                   </div>
-                  <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-end">
+                  <div className="flex gap-4 items-center">
                     <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">{bus.modifiedBy?.split('@')[0]}</span>
-                    {isAdmin && (
-                      <div className="flex gap-4">
-                        <button onClick={() => { setEditingId(bus.docId); setBusNumber(bus.number); setStatus(bus.status); setNotes(bus.notes); window.scrollTo({top: 0, behavior: 'smooth'}); }} className="text-[#002d72] font-black text-[10px] uppercase">Edit</button>
-                        <button onClick={() => deleteDoc(doc(db, "buses", bus.docId))} className="text-red-300 font-bold text-[10px] uppercase">Del</button>
-                      </div>
-                    )}
+                    {isAdmin && <button onClick={() => deleteDoc(doc(db, "buses", bus.docId))} className="text-red-300 font-bold text-[10px] uppercase">Del</button>}
                   </div>
                 </div>
               ))}
             </div>
           </>
-        ) : activeTab === 'admin' ? (
+        ) : activeTab === 'history' ? (
           <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 text-slate-900">
-            <h2 className="text-xl font-black text-[#002d72] uppercase mb-8 tracking-widest border-b pb-4">Team Authorizations</h2>
+            <div className="flex justify-between items-center mb-8 border-b pb-4">
+                <h2 className="text-xl font-black text-[#002d72] uppercase tracking-widest italic">Maintenance Timeline</h2>
+                {/* Admin Only Clear Button */}
+                {isAdmin && (
+                    <button onClick={clearHistory} className="bg-red-600 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase hover:bg-black transition-all shadow-md">
+                        Clear History
+                    </button>
+                )}
+            </div>
+            
+            <div className="mb-6 flex flex-col md:flex-row gap-4 items-center">
+                <input type="text" placeholder="🔍 Search History Unit #..." className="flex-1 p-4 border-2 border-slate-200 rounded-xl shadow-sm outline-none font-bold" value={historySearchTerm} onChange={(e) => setHistorySearchTerm(e.target.value)} />
+                <select value={historySortKey} onChange={(e) => setHistorySortKey(e.target.value)} className="bg-slate-100 text-[10px] font-black uppercase px-6 py-4 rounded-xl outline-none text-[#002d72] shadow-sm">
+                    <option value="timestamp">Newest First</option>
+                    <option value="number">Unit #</option>
+                </select>
+            </div>
+
             <div className="space-y-4">
-              {allUsers.filter(u => u.email !== 'anetowestfield@gmail.com').map((member, i) => (
-                <div key={i} className="flex flex-col md:flex-row items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 gap-6">
-                  <div className="flex flex-col flex-1">
-                    <span className="font-black text-[#002d72] text-lg">{member.email}</span>
-                    <span className={`text-[9px] font-black uppercase mt-1 ${member.role === 'admin' ? 'text-amber-500' : 'text-slate-400'}`}>Role: {member.role || 'user'}</span>
+              {sortedHistory.slice(0, 100).map((log, i) => (
+                <div key={i} className="flex flex-col md:flex-row items-center justify-between p-4 bg-slate-50 rounded-xl border-l-4 border-slate-200 hover:shadow-md transition-all">
+                  <div className="flex items-center gap-6 w-full md:w-auto">
+                    <span className="text-lg font-black text-[#002d72] w-16 tracking-tighter font-black">#{log.number}</span>
+                    <span className={`text-[8px] font-black px-2 py-1 rounded-full uppercase ${log.action === 'NEW' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>{log.action}</span>
                   </div>
-                  <div className="flex gap-3 w-full md:w-auto">
-                    <button 
-                      onClick={async () => await updateDoc(doc(db, "users", member.uid), { approved: !member.approved })}
-                      className={`flex-1 md:flex-none px-4 py-3 rounded-xl font-black text-[10px] uppercase shadow-md ${member.approved ? 'bg-red-500 text-white' : 'bg-green-600 text-white'}`}
-                    >
-                      {member.approved ? 'Revoke' : 'Approve'}
-                    </button>
-                    <button 
-                      onClick={async () => await updateDoc(doc(db, "users", member.uid), { role: member.role === 'admin' ? 'user' : 'admin' })}
-                      className={`flex-1 md:flex-none px-4 py-3 rounded-xl font-black text-[10px] uppercase border-2 ${member.role === 'admin' ? 'border-amber-500 text-amber-500 bg-white' : 'bg-amber-500 text-white'}`}
-                    >
-                      {member.role === 'admin' ? 'Demote' : 'Make Admin'}
-                    </button>
+                  <div className="flex-1 px-0 md:px-8 py-2 md:py-0 w-full md:w-auto min-w-0">
+                    <p className="text-slate-400 text-[11px] font-medium italic break-all">"{log.notes || "---"}"</p>
+                  </div>
+                  <div className="text-right w-full md:w-auto">
+                    <span className="font-mono text-[9px] text-slate-300 block">{(log.timestamp?.toDate().toLocaleString())}</span>
+                    <span className="text-[8px] font-bold text-[#002d72] uppercase opacity-40 tracking-widest">{log.modifiedBy?.split('@')[0]}</span>
                   </div>
                 </div>
               ))}
@@ -239,13 +290,18 @@ export default function MartaInventory() {
           </div>
         ) : (
           <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 text-slate-900">
-            <h2 className="text-xl font-black text-[#002d72] uppercase mb-8 tracking-widest border-b pb-4 italic">Timeline</h2>
-            <div className="space-y-3">
-              {history.slice(0, 30).map((log, i) => (
-                <div key={i} className="flex flex-col md:flex-row items-center justify-between p-4 bg-slate-50 rounded-xl border-l-4 border-slate-200">
-                  <span className="text-lg font-black text-[#002d72] w-16">#{log.number}</span>
-                  <p className="flex-1 px-4 text-slate-400 text-[10px] italic break-all font-medium">"{log.notes || "---"}"</p>
-                  <span className="font-mono text-[9px] text-slate-300">{(log.timestamp?.toDate().toLocaleString())}</span>
+            <h2 className="text-xl font-black text-[#002d72] uppercase mb-8 tracking-widest border-b pb-4">Team Management</h2>
+            <div className="space-y-4">
+              {allUsers.filter(u => u.email !== 'anetowestfield@gmail.com').map((member, i) => (
+                <div key={i} className="flex flex-col md:flex-row items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 gap-6 text-slate-900">
+                  <div className="flex flex-col flex-1">
+                    <span className="font-black text-[#002d72] text-lg">{member.email}</span>
+                    <p className="text-[9px] font-black uppercase text-slate-400">Role: {member.role || 'user'}</p>
+                  </div>
+                  <div className="flex gap-3 w-full md:w-auto">
+                    <button onClick={async () => await updateDoc(doc(db, "users", member.uid), { approved: !member.approved })} className={`flex-1 md:flex-none px-4 py-3 rounded-xl font-black text-[10px] uppercase shadow-md ${member.approved ? 'bg-red-500 text-white' : 'bg-green-600 text-white'}`}>{member.approved ? 'Revoke' : 'Approve'}</button>
+                    <button onClick={async () => await updateDoc(doc(db, "users", member.uid), { role: member.role === 'admin' ? 'user' : 'admin' })} className={`flex-1 md:flex-none px-4 py-3 rounded-xl font-black text-[10px] uppercase bg-amber-500 text-white`}>{member.role === 'admin' ? 'Demote' : 'Promote'}</button>
+                  </div>
                 </div>
               ))}
             </div>
