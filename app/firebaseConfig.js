@@ -1,8 +1,9 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore"; // This is required
+import { getFirestore } from "firebase/firestore"; // Added for database
+import { getAuth } from "firebase/auth"; // Added for login
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDlobwR52CQZPO-aRQQjMb0XqSlrr1PCZc",
+  apiKey: "AIzaSyDlobwR52cQZPO-aRQQjMb0XqSlrr1PCZc",
   authDomain: "bus-inventory.firebaseapp.com",
   projectId: "bus-inventory",
   storageBucket: "bus-inventory.firebasestorage.app",
@@ -11,8 +12,9 @@ const firebaseConfig = {
   measurementId: "G-SXFCZ0EK9N"
 };
 
-// Initialize the app
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// THIS IS THE CRITICAL LINE:
+// THESE ARE THE MISSING LINKS:
 export const db = getFirestore(app);
+export const auth = getAuth(app);
