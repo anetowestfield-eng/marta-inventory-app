@@ -133,7 +133,7 @@ export default function MartaInventory() {
           <input type="email" placeholder="Email" className="w-full p-4 border-2 rounded-xl mb-4 font-bold" value={email} onChange={(e) => setEmail(e.target.value)} required />
           <input type="password" placeholder="Password" className="w-full p-4 border-2 rounded-xl mb-6 font-bold" value={password} onChange={(e) => setPassword(e.target.value)} required />
           <button className="w-full bg-[#ef7c00] text-white font-black py-4 rounded-xl shadow-lg uppercase">{view}</button>
-          <button type="button" onClick={() => setView(view === 'login' ? 'signup' : 'login')} className="w-full mt-4 text-[10px] uppercase font-bold text-[#002d72] underline text-center block tracking-widest">Switch Mode</button>
+          <button type="button" onClick={() => setView(view === 'login' ? 'signup' : 'login')} className="w-full mt-4 text-[10px] uppercase font-bold text-[#002d72] underline text-center block tracking-widest">Sign UP</button>
         </form>
       </div>
     );
