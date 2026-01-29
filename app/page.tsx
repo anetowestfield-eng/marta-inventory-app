@@ -2,30 +2,31 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth } from './firebaseConfig'; 
 import { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, serverTimestamp, updateDoc, getDoc, setDoc } from "firebase/firestore";
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, User } from "firebase/auth";
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 
 export default function MartaInventory() {
-  const [user, setUser] = useState(null);
+  // THE FIX: Explicitly allow the User type or null
+  const [user, setUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState('fleet'); 
   const [isApproved, setIsApproved] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false); 
-  const [message, setMessage] = useState({ text: '', type: '' });
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [view, setView] = useState('login');
 
-  const [buses, setBuses] = useState([]);
-  const [history, setHistory] = useState([]);
-  const [allUsers, setAllUsers] = useState([]);
+  const [buses, setBuses] = useState<any[]>([]);
+  const [history, setHistory] = useState<any[]>([]);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [busNumber, setBusNumber] = useState('');
   const [status, setStatus] = useState('Active');
   const [notes, setNotes] = useState('');
-  const [editingId, setEditingId] = useState(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Identity Gate for Jay
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
@@ -48,6 +49,7 @@ export default function MartaInventory() {
     return () => unsubscribe();
   }, []);
 
+  // Fleet Sync
   useEffect(() => {
     if (!user || !isApproved) return;
     const unsubBuses = onSnapshot(query(collection(db, "buses"), orderBy("timestamp", "desc")), (snap) => {
@@ -66,15 +68,16 @@ export default function MartaInventory() {
     return () => { unsubBuses(); unsubHistory(); unsubUsers(); };
   }, [user, isApproved, isAdmin]);
 
+  // Excel Logic with Status Colors
   const exportToExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('MARTA Fleet');
     worksheet.columns = [
       { header: 'Unit #', key: 'number', width: 15 },
       { header: 'Status', key: 'status', width: 15 },
-      { header: 'Diagnostics/Notes', key: 'notes', width: 50 },
-      { header: 'Modified By', key: 'tech', width: 25 },
-      { header: 'Last Updated', key: 'time', width: 25 },
+      { header: 'Diagnostics', key: 'notes', width: 50 },
+      { header: 'Tech', key: 'tech', width: 25 },
+      { header: 'Updated', key: 'time', width: 25 },
     ];
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFF' } };
     worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '002D72' } };
@@ -92,7 +95,7 @@ export default function MartaInventory() {
         statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'C6EFCE' } };
         statusCell.font = { color: { argb: '006100' }, bold: true };
       } else if (bus.status === 'On Hold') {
-        statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC7CE' } };
+        statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC7CE' } Leo };
         statusCell.font = { color: { argb: '9C0006' }, bold: true };
       } else if (bus.status === 'In Shop') {
         statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEB9C' } };
@@ -101,31 +104,30 @@ export default function MartaInventory() {
     });
 
     const buffer = await workbook.xlsx.writeBuffer();
-    saveAs(new Blob([buffer]), `MARTA_Fleet_Report_${new Date().toLocaleDateString()}.xlsx`);
+    saveAs(new Blob([buffer]), `MARTA_Fleet_Report.xlsx`);
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const isValid = /^[a-zA-Z0-9]{4}$/.test(busNumber); 
-    if (!isValid) {
-      alert("Error: Unit number must be exactly 4 alphanumeric characters.");
+    if (!/^[a-zA-Z0-9]{4}$/.test(busNumber)) {
+      alert("Error: 4-digit alphanumeric required.");
       return;
     }
-    const data = { number: busNumber.toUpperCase(), status, notes, modifiedBy: user.email, timestamp: serverTimestamp() };
+    const data = { number: busNumber.toUpperCase(), status, notes, modifiedBy: user?.email, timestamp: serverTimestamp() };
     if (editingId) {
       await updateDoc(doc(db, "buses", editingId), data);
-      await addDoc(collection(db, "history"), { ...data, action: "EDIT", notes });
+      await addDoc(collection(db, "history"), { ...data, action: "EDIT" });
       setEditingId(null);
     } else {
       await addDoc(collection(db, "buses"), data);
-      await addDoc(collection(db, "history"), { ...data, action: "NEW", notes });
+      await addDoc(collection(db, "history"), { ...data, action: "NEW" });
     }
     setBusNumber(''); setNotes(''); setStatus('Active');
   };
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#002d72] p-4">
+      <div className="min-h-screen flex items-center justify-center bg-[#002d72] p-4 text-slate-900">
         <form onSubmit={async (e) => {
           e.preventDefault();
           try {
@@ -134,19 +136,19 @@ export default function MartaInventory() {
               const res = await createUserWithEmailAndPassword(auth, email, password);
               await setDoc(doc(db, "users", res.user.uid), { email, approved: false });
             }
-          } catch (err) { setMessage({ text: err.message, type: 'error' }); }
+          } catch (err: any) { alert(err.message); }
         }} className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md border-t-8 border-[#ef7c00]">
           <h2 className="text-2xl font-black text-center mb-6 uppercase text-[#002d72]">{view}</h2>
-          <input type="email" placeholder="Email" className="w-full p-4 border-2 rounded-xl mb-4" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          <input type="password" placeholder="Password" className="w-full p-4 border-2 rounded-xl mb-6" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <input type="email" placeholder="Email" className="w-full p-4 border-2 rounded-xl mb-4 font-bold" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <input type="password" placeholder="Password" className="w-full p-4 border-2 rounded-xl mb-6 font-bold" value={password} onChange={(e) => setPassword(e.target.value)} required />
           <button className="w-full bg-[#ef7c00] text-white font-black py-4 rounded-xl shadow-lg uppercase">{view}</button>
-          <button type="button" onClick={() => setView(view === 'login' ? 'signup' : 'login')} className="w-full mt-4 text-[10px] uppercase font-bold text-[#002d72] underline text-center block">Switch Mode</button>
+          <button type="button" onClick={() => setView(view === 'login' ? 'signup' : 'login')} className="w-full mt-4 text-[10px] uppercase font-bold text-[#002d72] underline text-center block">Toggle Login</button>
         </form>
       </div>
     );
   }
 
-  if (!isApproved) return <div className="p-20 text-center font-black text-[#002d72] uppercase">Access Pending Approval</div>;
+  if (!isApproved) return <div className="p-20 text-center font-black text-[#002d72] uppercase tracking-tighter">Access Pending Approval</div>;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-20 font-sans">
@@ -176,18 +178,18 @@ export default function MartaInventory() {
 
             <section className="bg-white p-6 rounded-2xl shadow-xl mb-12 border border-slate-200">
               <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <input type="text" placeholder="Unit # (4-Digit)" maxLength={4} className="p-4 border-2 border-slate-100 rounded-xl font-black uppercase" value={busNumber} onChange={(e) => setBusNumber(e.target.value)} required />
-                <select className="p-4 border-2 border-slate-100 rounded-xl font-bold bg-slate-50" value={status} onChange={(e) => setStatus(e.target.value)}>
+                <input type="text" placeholder="Unit #" maxLength={4} className="p-4 border-2 border-slate-100 rounded-xl font-black uppercase text-slate-900" value={busNumber} onChange={(e) => setBusNumber(e.target.value)} required />
+                <select className="p-4 border-2 border-slate-100 rounded-xl font-bold bg-slate-50 text-slate-900" value={status} onChange={(e) => setStatus(e.target.value)}>
                   <option value="Active">Ready</option><option value="On Hold">Hold</option><option value="In Shop">Shop</option>
                 </select>
-                <input type="text" placeholder="Notes" className="p-4 border-2 border-slate-100 rounded-xl" value={notes} onChange={(e) => setNotes(e.target.value)} />
+                <input type="text" placeholder="Diagnosis..." className="p-4 border-2 border-slate-100 rounded-xl text-slate-900" value={notes} onChange={(e) => setNotes(e.target.value)} />
                 <button type="submit" className="bg-[#ef7c00] text-white font-black py-4 rounded-xl shadow-lg uppercase hover:bg-black transition-all">{editingId ? "Save Change" : "Update Fleet"}</button>
               </form>
             </section>
 
             <div className="mb-6 flex gap-4">
-              <input type="text" placeholder="🔍 Search by Unit #..." className="flex-1 p-4 border-2 border-slate-200 rounded-xl shadow-sm outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-              {isAdmin && <button onClick={exportToExcel} className="bg-[#002d72] text-white px-6 py-4 rounded-xl font-black text-[10px] uppercase shadow-lg hover:bg-slate-800 transition-all">Export Excel</button>}
+              <input type="text" placeholder="🔍 Search..." className="flex-1 p-4 border-2 border-slate-200 rounded-xl shadow-sm text-slate-900" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              {isAdmin && <button onClick={exportToExcel} className="bg-[#002d72] text-white px-6 py-4 rounded-xl font-black text-[10px] uppercase">Export Excel</button>}
             </div>
             
             <div className="space-y-3">
@@ -201,7 +203,7 @@ export default function MartaInventory() {
                     <p className="text-slate-500 text-xs font-medium italic break-all">"{bus.notes || "---"}"</p>
                   </div>
                   <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-end">
-                    <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">{bus.modifiedBy.split('@')[0]}</span>
+                    <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">{bus.modifiedBy?.split('@')[0]}</span>
                     {isAdmin && (
                       <div className="flex gap-4">
                         <button onClick={() => { setEditingId(bus.docId); setBusNumber(bus.number); setStatus(bus.status); setNotes(bus.notes); window.scrollTo({top: 0, behavior: 'smooth'}); }} className="text-[#002d72] font-black text-[10px] uppercase">Edit</button>
@@ -215,34 +217,25 @@ export default function MartaInventory() {
           </>
         ) : activeTab === 'history' ? (
           <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100">
-            <h2 className="text-xl font-black text-[#002d72] uppercase mb-8 tracking-widest border-b pb-4">Maintenance Timeline</h2>
+            <h2 className="text-xl font-black text-[#002d72] uppercase mb-8 tracking-widest border-b pb-4">Timeline</h2>
             <div className="space-y-3">
               {history.map((log, i) => (
                 <div key={i} className="flex flex-col md:flex-row items-center justify-between p-4 bg-slate-50 rounded-xl border-l-4 border-slate-200">
-                  <div className="flex items-center gap-6 w-full md:w-auto">
-                    <span className="text-lg font-black text-[#002d72] w-16 tracking-tighter">#{log.number}</span>
-                    <span className="text-[9px] font-black uppercase text-slate-500">{log.status}</span>
-                  </div>
-                  <div className="flex-1 px-0 md:px-8 py-2 md:py-0 w-full md:w-auto min-w-0">
-                    <p className="text-slate-400 text-[10px] font-medium italic break-all">"{log.notes || "---"}"</p>
-                  </div>
-                  <div className="text-right w-full md:w-auto">
-                    <span className="font-mono text-[9px] text-slate-300 block">{(log.timestamp?.toDate().toLocaleString())}</span>
-                  </div>
+                  <span className="text-lg font-black text-[#002d72] w-16">#{log.number}</span>
+                  <p className="flex-1 px-4 text-slate-400 text-[10px] italic break-all">"{log.notes || "---"}"</p>
+                  <span className="font-mono text-[9px] text-slate-300">{(log.timestamp?.toDate().toLocaleString())}</span>
                 </div>
               ))}
             </div>
           </div>
         ) : (
           <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100">
-            <h2 className="text-xl font-black text-[#002d72] uppercase mb-8 tracking-widest border-b pb-4">Team Authorizations</h2>
+            <h2 className="text-xl font-black text-[#002d72] uppercase mb-8 tracking-widest border-b pb-4">Team</h2>
             <div className="space-y-4">
               {allUsers.filter(u => u.email !== 'anetowestfield@gmail.com').map((member, i) => (
-                <div key={i} className="flex flex-col md:flex-row items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 gap-4">
-                  <div className="flex flex-col">
-                    <span className="font-black text-[#002d72] text-lg">{member.email}</span>
-                  </div>
-                  <button onClick={async () => await updateDoc(doc(db, "users", member.uid), { approved: !member.approved })} className={`px-6 py-3 rounded-xl font-black text-[10px] uppercase shadow-md ${member.approved ? 'bg-red-500 text-white' : 'bg-green-600 text-white'}`}>
+                <div key={i} className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl">
+                  <span className="font-black text-[#002d72]">{member.email}</span>
+                  <button onClick={async () => await updateDoc(doc(db, "users", member.uid), { approved: !member.approved })} className={`px-6 py-2 rounded-xl font-black text-[10px] uppercase ${member.approved ? 'bg-red-500 text-white' : 'bg-green-600 text-white'}`}>
                     {member.approved ? 'Revoke' : 'Approve'}
                   </button>
                 </div>
