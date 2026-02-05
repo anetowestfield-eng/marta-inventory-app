@@ -7,15 +7,22 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import dynamic from 'next/dynamic';
 
-// Use dynamic import for BusTracker to prevent "window is not defined" errors
+// FIXED: The dynamic import with ssr: false is required for Leaflet/Maps to prevent crashes
 const BusTracker = dynamic(() => import('./BusTracker'), { 
   ssr: false,
-  loading: () => <div className="p-10 text-center font-black text-[#002d72]">LOADING LIVE TRACKER...</div>
+  loading: () => (
+    <div className="flex items-center justify-center h-[85vh] bg-slate-900 rounded-2xl border border-slate-700">
+      <div className="text-center">
+        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+        <p className="text-blue-400 font-black uppercase tracking-widest text-xs">Initializing Live MARTA Feed...</p>
+      </div>
+    </div>
+  )
 });
 
 export default function MartaInventory() {
   const [user, setUser] = useState<any>(null);
-  const [view, setView] = useState<'inventory' | 'tracker'>('inventory'); // New state for toggling views
+  const [view, setView] = useState<'inventory' | 'tracker'>('inventory');
   const [buses, setBuses] = useState<any[]>([]);
   const [expandedBus, setExpandedBus] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -23,7 +30,6 @@ export default function MartaInventory() {
   const [password, setPassword] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: 'number', direction: 'asc' });
 
-  // Statuses that count as RED (On Hold)
   const holdStatuses = ['On Hold', 'Engine', 'Body Shop', 'Vendor', 'Brakes', 'Safety'];
 
   const getBusSpecs = (num: string) => {
@@ -156,7 +162,6 @@ export default function MartaInventory() {
             <span className="font-black text-lg italic uppercase tracking-tighter text-[#002d72]">Fleet Manager</span>
         </div>
         <div className="flex gap-6 items-center">
-          {/* Toggle View Button */}
           <button 
             onClick={() => setView(view === 'inventory' ? 'tracker' : 'inventory')}
             className="text-[#002d72] hover:text-[#ef7c00] text-[10px] font-black uppercase transition-all tracking-widest border-b-2 border-transparent hover:border-[#ef7c00] pb-1"
@@ -173,7 +178,7 @@ export default function MartaInventory() {
 
       <main className="max-w-[1600px] mx-auto p-6">
         {view === 'tracker' ? (
-          <div className="h-[85vh] bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="h-[85vh] bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative">
              <BusTracker />
           </div>
         ) : (
