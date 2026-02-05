@@ -19,8 +19,7 @@ const BusTracker = dynamic(() => import('./BusTracker'), {
   )
 });
 
-// Reusable Edit Form Component (Used in List Row and Grid Modal)
-const EditBusForm = ({ bus, onClose }) => {
+const EditBusForm = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
     return (
         <div className="bg-white p-6 rounded-xl shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
@@ -109,10 +108,7 @@ const EditBusForm = ({ bus, onClose }) => {
 export default function MartaInventory() {
   const [user, setUser] = useState<any>(null);
   const [view, setView] = useState<'inventory' | 'tracker'>('inventory');
-  
-  // FIXED: Set Grid View as default
   const [inventoryMode, setInventoryMode] = useState<'list' | 'grid'>('grid');
-  
   const [buses, setBuses] = useState<any[]>([]);
   const [expandedBus, setExpandedBus] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -202,7 +198,7 @@ export default function MartaInventory() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
         <form onSubmit={async (e) => { e.preventDefault(); try { await signInWithEmailAndPassword(auth, email, password); } catch (err) {} }} 
-          className="bg-white p-10 rounded-2xl shadow-xl w-full max-w-sm border-t-8 border-[#ef7c00]">
+          className="bg-white p-10 rounded-2xl shadow-xl w-full max-sm border-t-8 border-[#ef7c00]">
           <h2 className="text-2xl font-black text-center mb-8 uppercase text-[#002d72] tracking-tighter italic">MARTA Ops</h2>
           <input type="email" placeholder="Email" className="w-full p-4 border-2 rounded-xl mb-4 font-bold outline-none" value={email} onChange={(e) => setEmail(e.target.value)} required />
           <input type="password" placeholder="Password" className="w-full p-4 border-2 rounded-xl mb-8 font-bold outline-none" value={password} onChange={(e) => setPassword(e.target.value)} required />
@@ -217,7 +213,6 @@ export default function MartaInventory() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-[#ef7c00] selection:text-white relative">
       
-      {/* GRID VIEW MODAL */}
       {inventoryMode === 'grid' && expandedBus && expandedBusObj && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -251,7 +246,8 @@ export default function MartaInventory() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+            {/* Slender Metrics Row */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               {[
                 { label: 'Total Fleet', val: buses.length, color: 'text-slate-900' },
                 { label: 'Ready', val: buses.filter(b => b.status === 'Active').length, color: 'text-green-600' },
@@ -261,10 +257,10 @@ export default function MartaInventory() {
                 <div 
                     key={i} 
                     onClick={() => setActiveFilter(m.label)}
-                    className={`bg-white p-6 rounded-xl shadow-sm border flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] ${activeFilter === m.label ? 'border-[#002d72] ring-2 ring-[#002d72]/10 bg-blue-50/50' : 'border-slate-100 hover:border-slate-300'}`}
+                    className={`bg-white py-4 px-6 rounded-xl shadow-sm border flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] ${activeFilter === m.label ? 'border-[#002d72] ring-2 ring-[#002d72]/10 bg-blue-50/50' : 'border-slate-100 hover:border-slate-300'}`}
                 >
-                    <p className="text-[9px] font-black uppercase text-slate-400 mb-1 tracking-widest">{m.label}</p>
-                    <p className={`text-4xl font-black tabular-nums ${m.color}`}>{m.val}</p>
+                    <p className="text-[8px] font-black uppercase text-slate-400 mb-0.5 tracking-widest">{m.label}</p>
+                    <p className={`text-2xl font-black tabular-nums ${m.color}`}>{m.val}</p>
                 </div>
               ))}
             </div>
@@ -281,15 +277,15 @@ export default function MartaInventory() {
                     <div className="bg-white border border-slate-200 rounded-lg p-1 flex">
                         <button 
                             onClick={() => setInventoryMode('list')}
-                            className={`px-4 py-2 text-[10px] font-black uppercase rounded-md transition-all ${inventoryMode === 'list' ? 'bg-[#002d72] text-white shadow-md' : 'text-slate-400 hover:text-[#002d72]'}`}
+                            className={`px-4 py-1.5 text-[10px] font-black uppercase rounded-md transition-all ${inventoryMode === 'list' ? 'bg-[#002d72] text-white shadow-md' : 'text-slate-400 hover:text-[#002d72]'}`}
                         >
-                            List View
+                            List
                         </button>
                         <button 
                             onClick={() => setInventoryMode('grid')}
-                            className={`px-4 py-2 text-[10px] font-black uppercase rounded-md transition-all ${inventoryMode === 'grid' ? 'bg-[#002d72] text-white shadow-md' : 'text-slate-400 hover:text-[#002d72]'}`}
+                            className={`px-4 py-1.5 text-[10px] font-black uppercase rounded-md transition-all ${inventoryMode === 'grid' ? 'bg-[#002d72] text-white shadow-md' : 'text-slate-400 hover:text-[#002d72]'}`}
                         >
-                            Grid View
+                            Grid
                         </button>
                     </div>
 
@@ -361,35 +357,27 @@ export default function MartaInventory() {
                         </div>
                     </>
                 ) : (
+                    /* Slender Grid Layout */
                     <div className="p-8">
                         {sortedBuses.length === 0 ? (
                             <div className="text-center text-slate-400 italic">No buses found.</div>
                         ) : (
-                            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-4">
+                            <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-3">
                                 {sortedBuses.map((bus) => {
                                     const isHoldGroup = holdStatuses.includes(bus.status);
-                                    let cardClass = "";
-                                    let textClass = "";
-                                    if (bus.status === 'Active') {
-                                        cardClass = "bg-green-50 border-green-200 hover:bg-green-100 hover:border-green-400";
-                                        textClass = "text-green-800";
-                                    } else if (isHoldGroup) {
-                                        cardClass = "bg-red-50 border-red-200 hover:bg-red-100 hover:border-red-400";
-                                        textClass = "text-red-800";
-                                    } else {
-                                        cardClass = "bg-orange-50 border-orange-200 hover:bg-orange-100 hover:border-orange-400";
-                                        textClass = "text-orange-800";
-                                    }
+                                    let colors = "bg-green-50 border-green-200 text-green-800 hover:border-green-400";
+                                    if (isHoldGroup) colors = "bg-red-50 border-red-200 text-red-800 hover:border-red-400";
+                                    else if (bus.status !== 'Active') colors = "bg-orange-50 border-orange-200 text-orange-800 hover:border-orange-400";
 
                                     return (
                                         <div 
                                             key={bus.docId}
                                             onClick={() => setExpandedBus(bus.docId)}
-                                            className={`aspect-square rounded-xl border-2 flex flex-col items-center justify-center cursor-pointer transition-all shadow-sm hover:shadow-md hover:scale-105 ${cardClass}`}
+                                            className={`h-14 rounded-lg border-2 flex flex-col items-center justify-center cursor-pointer transition-all shadow-sm hover:shadow-md hover:scale-105 ${colors}`}
                                         >
-                                            <span className={`text-xl font-black italic tracking-tighter ${textClass}`}>#{bus.number}</span>
+                                            <span className="text-xs font-black italic tracking-tighter">#{bus.number}</span>
                                             {bus.status !== 'Active' && (
-                                                <span className={`text-[9px] font-bold uppercase mt-1 px-1.5 py-0.5 rounded-full bg-white/50 ${textClass}`}>
+                                                <span className="text-[7px] font-bold uppercase mt-0.5 px-1.5 py-0.25 rounded-full bg-white/50">
                                                     {bus.status === 'On Hold' ? 'HOLD' : bus.status}
                                                 </span>
                                             )}
