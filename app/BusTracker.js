@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Map from "./Map";
 
 export default function BusTracker() {
@@ -7,22 +7,25 @@ export default function BusTracker() {
   const [routes, setRoutes] = useState({});
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortBy, setSortBy] = useState("unit"); // 'unit' or 'route'
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch both live buses and the local routes.json
         const [vegRes, routeRes] = await Promise.all([
           fetch("/api/vehicles"),
           fetch("/api/routes")
         ]);
-        
         const vehicleData = await vegRes.json();
         const routeData = await routeRes.json();
         
-        if (vehicleData.entity) {
-          setVehicles(vehicleData.entity);
-        }
+        // PERSISTENCE LOGIC: Merge new data into existing list to keep "Ghost" buses
+        setVehicles(prev => {
+          const newMap = new Map(prev.map(v => [v.id, v]));
+          vehicleData.entity?.forEach(v => newMap.set(v.id, v));
+          return Array.from(newMap.values());
+        });
         setRoutes(routeData || {});
       } catch (error) {
         console.error("Error loading MARTA data:", error);
@@ -32,44 +35,102 @@ export default function BusTracker() {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 10000);
+    const interval = setInterval(fetchData, 15000); 
     return () => clearInterval(interval);
   }, []);
 
-  if (loading) return (
-    <div className="h-full flex items-center justify-center bg-slate-900">
-      <p className="text-[#ef7c00] font-black italic animate-pulse uppercase tracking-widest">
-        Syncing MARTA Fleet...
-      </p>
-    </div>
-  );
+  // Professional Metrics Logic
+  const stats = useMemo(() => {
+    const total = vehicles.length;
+    // Active if seen in the last 5 minutes
+    const active = vehicles.filter(v => (Date.now() - (v.vehicle?.timestamp * 1000)) < 300000).length;
+    return { total, active, hold: total - active };
+  }, [vehicles]);
+
+  // Search & Sorting Logic
+  const processedVehicles = useMemo(() => {
+    let filtered = vehicles.filter(v => {
+      const busNum = (v.vehicle?.vehicle?.label || v.vehicle?.vehicle?.id || "").toLowerCase();
+      return busNum.includes(searchTerm.toLowerCase());
+    });
+
+    return filtered.sort((a, b) => {
+      if (sortBy === "route") {
+        const routeA = routes[a.vehicle?.trip?.route_id] || "999";
+        const routeB = routes[b.vehicle?.trip?.route_id] || "999";
+        return routeA.localeCompare(routeB);
+      }
+      return (a.vehicle?.vehicle?.label || "").localeCompare(b.vehicle?.vehicle?.label || "");
+    });
+  }, [vehicles, routes, searchTerm, sortBy]);
+
+  if (loading) return <div className="h-screen flex items-center justify-center bg-[#002d72] text-white font-black italic animate-pulse">FLEET COMMAND INITIALIZING...</div>;
 
   return (
-    <div className="flex h-screen bg-white overflow-hidden text-slate-900">
-      {/* SIDEBAR */}
-      <div className="w-64 bg-slate-50 border-r border-slate-200 flex flex-col">
-        <div className="p-4 bg-[#002d72] text-white">
-          <h2 className="text-[10px] font-black uppercase tracking-widest">Active Units ({vehicles.length})</h2>
+    <div className="flex flex-col h-screen bg-white">
+      {/* PROFESSIONAL METRICS HEADER */}
+      <div className="flex items-center justify-between px-6 py-4 bg-[#002d72] text-white border-b border-white/10 shadow-xl">
+        <div className="flex gap-10">
+          <div><p className="text-[9px] font-bold opacity-50 uppercase tracking-widest">Total Fleet</p><p className="text-xl font-black leading-tight">{stats.total}</p></div>
+          <div><p className="text-[9px] font-bold opacity-50 uppercase tracking-widest text-green-400">Live Active</p><p className="text-xl font-black leading-tight text-green-400">{stats.active}</p></div>
+          <div><p className="text-[9px] font-bold opacity-50 uppercase tracking-widest text-[#ef7c00]">OOS / On Hold</p><p className="text-xl font-black leading-tight text-[#ef7c00]">{stats.hold}</p></div>
         </div>
-        <div className="flex-grow overflow-y-auto divide-y divide-slate-100">
-          {vehicles.map((v) => {
-            const busNum = v.vehicle?.vehicle?.label || v.vehicle?.vehicle?.id;
-            const id = v.vehicle?.vehicle?.id;
-            return (
-              <button 
-                key={id}
-                onClick={() => setSelectedId(id)}
-                className={`w-full p-3 text-left transition-colors hover:bg-white ${selectedId === id ? 'bg-blue-100 border-l-4 border-[#002d72]' : ''}`}
-              >
-                <span className="font-black text-slate-700 text-sm italic">#{busNum}</span>
-              </button>
-            );
-          })}
+        
+        <div className="flex items-center gap-3">
+          <input 
+            type="text" 
+            placeholder="Search Unit #..."
+            className="bg-white/10 border border-white/20 rounded px-3 py-1.5 text-xs font-bold outline-none placeholder:opacity-40 focus:bg-white/20 transition-all w-40"
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          <select 
+            onChange={(e) => setSortBy(e.target.value)}
+            className="bg-[#002d72] text-[10px] font-black uppercase p-2 rounded border border-white/30 cursor-pointer outline-none"
+          >
+            <option value="unit">Sort: Unit #</option>
+            <option value="route">Sort: Route</option>
+          </select>
         </div>
       </div>
 
-      <div className="flex-grow relative">
-        <Map buses={vehicles} selectedId={selectedId} routes={routes} />
+      <div className="flex flex-grow overflow-hidden">
+        {/* PROFESSIONAL SIDEBAR */}
+        <div className="w-80 bg-slate-50 border-r border-slate-200 flex flex-col shadow-inner">
+          <div className="flex-grow overflow-y-auto">
+            {processedVehicles.map((v) => {
+              const vehicle = v.vehicle;
+              const busNum = vehicle?.vehicle?.label || vehicle?.vehicle?.id;
+              const routeInfo = routes[vehicle?.trip?.route_id] || "Special / Not In Service";
+              const lastSeenMs = vehicle?.timestamp * 1000;
+              const isStale = (Date.now() - lastSeenMs) > 300000;
+
+              return (
+                <button 
+                  key={v.id}
+                  onClick={() => setSelectedId(vehicle?.vehicle?.id)}
+                  className={`w-full p-4 text-left border-b border-slate-100 transition-all flex items-center justify-between group ${selectedId === vehicle?.vehicle?.id ? 'bg-blue-100 border-l-8 border-[#002d72]' : 'hover:bg-white border-l-8 border-transparent'}`}
+                >
+                  <div>
+                    <p className={`font-black text-sm italic tracking-tighter ${isStale ? 'text-slate-400' : 'text-slate-900'}`}>
+                      UNIT #{busNum}
+                    </p>
+                    <p className="text-[10px] font-bold text-[#ef7c00] uppercase truncate w-52 leading-none mt-1">
+                      {routeInfo.split(' - ')[1] || routeInfo}
+                    </p>
+                  </div>
+                  <div className={`text-[9px] font-black px-2 py-1 rounded ${isStale ? 'bg-slate-200 text-slate-500' : 'bg-green-100 text-green-700 animate-pulse'}`}>
+                    {isStale ? 'OOS' : 'LIVE'}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* MAP AREA */}
+        <div className="flex-grow relative">
+          <Map buses={vehicles} selectedId={selectedId} routes={routes} />
+        </div>
       </div>
     </div>
   );
