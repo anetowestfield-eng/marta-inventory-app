@@ -247,7 +247,7 @@ export default function MartaInventory() {
 
   const holdStatuses = ['On Hold', 'Engine', 'Body Shop', 'Vendor', 'Brakes', 'Safety'];
 
-  // --- REFINED EXCEL PARSER ---
+  // --- SAFETY-NET EXCEL PARSER ---
   const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -265,7 +265,7 @@ export default function MartaInventory() {
         const uploadQueue: any[] = [];
         const currentYear = new Date().getFullYear();
 
-        // 1. STRICT MAPPING
+        // STRICT MAPPING + SAFETY NETS
         const categoryMap: { [key: string]: string } = {
             'ENGINE': 'Engine',
             'VENDOR': 'Vendor',
@@ -274,7 +274,9 @@ export default function MartaInventory() {
             'CODE 1 BRAKES': 'Brakes',
             'NEW BRAKES': 'Brakes',
             'SERVICE CALLS': 'In Shop',
-            'TRIPPER': 'Active' // Added Tripper as requested
+            // Added TRIPPER with variations
+            'TRIPPER': 'Active',
+            'TRIPPERS': 'Active'
         };
 
         const formatOOSDate = (raw: string) => {
@@ -291,6 +293,7 @@ export default function MartaInventory() {
         for (let col = 1; col <= 20; col++) {
             let currentStatus = '';
             worksheet?.getColumn(col).eachCell((cell) => {
+                // TRIM() and TOUPPERCASE() for whitespace protection
                 const val = cell.value ? cell.value.toString().trim().toUpperCase() : '';
                 
                 // Header detection
@@ -317,7 +320,7 @@ export default function MartaInventory() {
 
                     notes = notes.replace(/\([A-Z]\)/g, '').trim();
                     
-                    // 2. SAFETY HOLD DETECTION
+                    // SAFETY HOLD CHECK
                     let finalStatus = currentStatus;
                     if (remainingText.toUpperCase().includes('SAFETY HOLD')) {
                         finalStatus = 'Safety';
@@ -337,7 +340,7 @@ export default function MartaInventory() {
         }
 
         if (uploadQueue.length === 0) {
-            alert("No recognized bus data found. Ensure categories like ENGINE or TRIPPER are present.");
+            alert("No recognized bus data found. Ensure headers like ENGINE or TRIPPER are present.");
             return;
         }
 
@@ -348,7 +351,7 @@ export default function MartaInventory() {
         });
         await batch.commit();
 
-        alert(`Successfully updated ${uploadQueue.length} buses.`);
+        alert(`Success! Updated ${uploadQueue.length} buses from authorized categories.`);
         
       } catch (err) {
         console.error("Parsing Error:", err);
@@ -479,6 +482,7 @@ export default function MartaInventory() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-[#ef7c00] selection:text-white relative">
       
+      {/* DISPLAY MODAL (Read Only) */}
       {inventoryMode === 'grid' && selectedBusDetail && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
             <BusDetailView bus={selectedBusDetail} onClose={() => setSelectedBusDetail(null)} />
@@ -519,7 +523,7 @@ export default function MartaInventory() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               {[
                 { label: 'Total Fleet', val: buses.length, color: 'text-slate-900' },
-                // FIX: "Ready" count logic
+                // FIX: "Ready" now explicitly adds Active + In Shop counts
                 { label: 'Ready', val: buses.filter(b => b.status === 'Active' || b.status === 'In Shop').length, color: 'text-green-600' },
                 { label: 'On Hold', val: buses.filter(b => holdStatuses.includes(b.status)).length, color: 'text-red-600' },
                 { label: 'In Shop', val: buses.filter(b => b.status === 'In Shop').length, color: 'text-[#ef7c00]' }
