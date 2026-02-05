@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect } from 'react';
 import { db, auth } from './firebaseConfig'; 
-import { collection, onSnapshot, query, orderBy, doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc, serverTimestamp, setDoc, writeBatch, getDocs } from "firebase/firestore";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
@@ -19,7 +19,91 @@ const BusTracker = dynamic(() => import('./BusTracker'), {
   )
 });
 
-// --- COMPONENT: Data Entry Form (Only place to edit) ---
+// --- COMPONENT: Read-Only Bus Details (Inventory Tab) ---
+const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
+    const [showHistory, setShowHistory] = useState(false);
+
+    // Placeholder history data - in a real app this would query a sub-collection
+    const historyLog = [
+        { date: '2025-01-15', event: 'Preventative Maintenance', type: 'Routine' },
+        { date: '2024-11-20', event: 'Brake Replacement', type: 'Repair' },
+        { date: '2024-08-05', event: 'AC Unit Service', type: 'Vendor' }
+    ];
+
+    if (showHistory) {
+        return (
+            <div className="bg-white p-6 rounded-xl shadow-2xl border border-slate-200 w-full max-w-lg h-[500px] flex flex-col animate-in zoom-in-95">
+                <div className="flex justify-between items-center mb-4 border-b pb-4">
+                    <h3 className="text-xl font-black text-[#002d72] uppercase">History: Bus #{bus.number}</h3>
+                    <button onClick={() => setShowHistory(false)} className="text-sm font-bold text-slate-400 hover:text-[#002d72]">Back</button>
+                </div>
+                <div className="flex-grow overflow-y-auto space-y-3">
+                    {historyLog.map((log, i) => (
+                        <div key={i} className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                            <div className="flex justify-between text-[10px] font-black uppercase text-slate-400 mb-1">
+                                <span>{log.date}</span>
+                                <span>{log.type}</span>
+                            </div>
+                            <p className="text-sm font-bold text-slate-700">{log.event}</p>
+                        </div>
+                    ))}
+                    <div className="text-center text-xs text-slate-400 italic mt-4">End of recent records</div>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="bg-white p-8 rounded-xl shadow-2xl border border-slate-200 w-full max-w-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-start mb-8 border-b border-slate-100 pb-6">
+                <div>
+                    <h3 className="text-4xl font-black text-[#002d72] italic uppercase tracking-tighter">Bus #{bus.number}</h3>
+                    <span className={`inline-block mt-2 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${bus.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {bus.status}
+                    </span>
+                </div>
+                <button onClick={onClose} className="w-10 h-10 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 font-bold text-xl transition-colors">✕</button>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-8 mb-8">
+                <div className="col-span-2 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <label className="text-[9px] font-black uppercase text-slate-400 block mb-2">Fault Details / Notes</label>
+                    <p className="text-lg font-medium text-slate-800 leading-relaxed">
+                        {bus.notes || <span className="italic text-slate-400 opacity-50">No active fault details recorded.</span>}
+                    </p>
+                </div>
+                
+                <div className="space-y-1">
+                    <label className="text-[9px] font-black uppercase text-slate-400">OOS Date</label>
+                    <p className="text-xl font-black text-[#002d72]">{bus.oosStartDate || '--'}</p>
+                </div>
+                <div className="space-y-1">
+                    <label className="text-[9px] font-black uppercase text-slate-400">Location</label>
+                    <p className="text-xl font-black text-slate-700">{bus.location || '---'}</p>
+                </div>
+                <div className="space-y-1">
+                    <label className="text-[9px] font-black uppercase text-slate-400">Expected Return</label>
+                    <p className="text-xl font-black text-[#ef7c00]">{bus.expectedReturnDate || '--'}</p>
+                </div>
+                <div className="space-y-1">
+                    <label className="text-[9px] font-black uppercase text-slate-400">Actual Return</label>
+                    <p className="text-xl font-black text-green-600">{bus.actualReturnDate || '--'}</p>
+                </div>
+            </div>
+
+            <div className="flex justify-between items-center pt-6 border-t border-slate-100">
+                <button onClick={() => setShowHistory(true)} className="flex items-center gap-2 px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-black uppercase transition-all">
+                    <span>📜</span> View History
+                </button>
+                <button onClick={onClose} className="px-8 py-3 bg-[#002d72] hover:bg-[#001a3d] text-white rounded-lg text-xs font-black uppercase transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5">
+                    Close Profile
+                </button>
+            </div>
+        </div>
+    );
+};
+
+// --- COMPONENT: Data Entry Form (With Clear All) ---
 const BusInputForm = () => {
     const [formData, setFormData] = useState({
         number: '',
@@ -41,14 +125,12 @@ const BusInputForm = () => {
         if (!formData.number) return;
 
         try {
-            // Merges data: Updates existing bus or creates new one
             await setDoc(doc(db, "buses", formData.number), {
                 ...formData,
                 timestamp: serverTimestamp()
             }, { merge: true });
             
-            alert(`Bus #${formData.number} Record Saved Successfully!`);
-            // Reset main fields but keep location for faster batch entry
+            alert(`Bus #${formData.number} Saved!`);
             setFormData(prev => ({ ...prev, number: '', status: 'Active', notes: '' })); 
         } catch (err) {
             console.error(err);
@@ -56,8 +138,35 @@ const BusInputForm = () => {
         }
     };
 
+    // --- NEW: Global Clear Function ---
+    const handleGlobalReset = async () => {
+        if (!confirm("⚠️ DANGER: This will set EVERY bus in the fleet to 'Active' status and clear all fault notes.\n\nAre you absolutely sure?")) return;
+        
+        try {
+            const querySnapshot = await getDocs(collection(db, "buses"));
+            const batch = writeBatch(db);
+            
+            querySnapshot.docs.forEach((document) => {
+                batch.update(doc(db, "buses", document.id), {
+                    status: 'Active',
+                    notes: '',
+                    location: '',
+                    oosStartDate: '',
+                    expectedReturnDate: '',
+                    actualReturnDate: ''
+                });
+            });
+
+            await batch.commit();
+            alert("✅ Fleet Reset Complete. All buses are now Active.");
+        } catch (err) {
+            console.error("Batch reset failed:", err);
+            alert("Failed to reset fleet.");
+        }
+    };
+
     return (
-        <div className="max-w-2xl mx-auto mt-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="max-w-2xl mx-auto mt-10 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
             <div className="bg-white p-8 rounded-2xl shadow-xl border-t-8 border-[#002d72]">
                 <div className="mb-8 text-center">
                     <h2 className="text-3xl font-black text-[#002d72] italic uppercase tracking-tighter">Data Entry Terminal</h2>
@@ -114,6 +223,13 @@ const BusInputForm = () => {
                         Save Record
                     </button>
                 </form>
+
+                {/* CLEAR ALL BUTTON */}
+                <div className="mt-12 pt-8 border-t border-slate-100 text-center">
+                    <button onClick={handleGlobalReset} className="text-red-500 hover:text-red-700 hover:bg-red-50 px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">
+                        ⚠️ Reset Entire Fleet to Ready
+                    </button>
+                </div>
             </div>
         </div>
     );
@@ -124,6 +240,7 @@ export default function MartaInventory() {
   const [view, setView] = useState<'inventory' | 'tracker' | 'input'>('inventory');
   const [inventoryMode, setInventoryMode] = useState<'list' | 'grid'>('grid');
   const [buses, setBuses] = useState<any[]>([]);
+  const [selectedBusDetail, setSelectedBusDetail] = useState<any>(null); // For Read-Only Modal
   const [searchTerm, setSearchTerm] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -296,6 +413,14 @@ export default function MartaInventory() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-[#ef7c00] selection:text-white relative">
+      
+      {/* DISPLAY MODAL (Read Only) */}
+      {inventoryMode === 'grid' && selectedBusDetail && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <BusDetailView bus={selectedBusDetail} onClose={() => setSelectedBusDetail(null)} />
+        </div>
+      )}
+
       <nav className="bg-white border-b border-slate-200 sticky top-0 z-[1001] px-6 py-4 flex justify-between items-center shadow-sm">
         <div className="flex items-center gap-3">
             <div className="w-2 h-6 bg-[#002d72] rounded-full"></div>
@@ -367,7 +492,7 @@ export default function MartaInventory() {
                             <div onClick={() => requestSort('expectedReturnDate')} className="col-span-1 cursor-pointer hover:text-[#002d72] flex items-center">Exp Return {getSortIcon('expectedReturnDate')}</div>
                             <div onClick={() => requestSort('actualReturnDate')} className="col-span-1 cursor-pointer hover:text-[#002d72] flex items-center">Act Return {getSortIcon('actualReturnDate')}</div>
                             <div onClick={() => requestSort('daysOOS')} className="col-span-1 cursor-pointer hover:text-[#002d72] flex items-center">Days OOS {getSortIcon('daysOOS')}</div>
-                            {/* ACTION COLUMN REMOVED FOR READ-ONLY */}
+                            {/* No action column */}
                         </div>
 
                         <div className="divide-y divide-slate-100">
@@ -390,7 +515,7 @@ export default function MartaInventory() {
 
                                     return (
                                         <div key={bus.docId} className={`group ${rowClass}`}>
-                                            <div className="grid grid-cols-10 gap-4 p-5 items-center">
+                                            <div onClick={() => setSelectedBusDetail(bus)} className="grid grid-cols-10 gap-4 p-5 items-center cursor-pointer">
                                                 <div className={`col-span-1 text-lg font-black ${statusTextColor}`}>#{bus.number}</div>
                                                 <div className="col-span-1"><span className="bg-white/50 border border-black/5 text-slate-500 text-[9px] font-bold px-2 py-1 rounded-md">{specs.length}</span></div>
                                                 <div className="col-span-1"><span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${statusBadgeClass}`}>{bus.status}</span></div>
@@ -415,7 +540,7 @@ export default function MartaInventory() {
                                 else if (bus.status !== 'Active') colors = "bg-orange-50 border-orange-200 text-orange-800 hover:border-orange-400";
 
                                 return (
-                                    <div key={bus.docId} className={`h-14 rounded-lg border-2 flex flex-col items-center justify-center shadow-sm ${colors}`}>
+                                    <div key={bus.docId} onClick={() => setSelectedBusDetail(bus)} className={`h-14 rounded-lg border-2 flex flex-col items-center justify-center cursor-pointer shadow-sm ${colors}`}>
                                         <span className="text-xs font-black italic tracking-tighter">#{bus.number}</span>
                                         {bus.status !== 'Active' && <span className="text-[7px] font-bold uppercase opacity-60 leading-none mt-0.5">{bus.status}</span>}
                                     </div>
