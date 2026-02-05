@@ -19,7 +19,6 @@ const BusTracker = dynamic(() => import('./BusTracker'), {
   )
 });
 
-// --- COMPONENT: Read-Only Bus Details ---
 const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
     const [showHistory, setShowHistory] = useState(false);
     const historyLog: any[] = []; 
@@ -103,7 +102,6 @@ const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
     );
 };
 
-// --- COMPONENT: Data Entry Form ---
 const BusInputForm = () => {
     const [formData, setFormData] = useState({
         number: '',
@@ -247,7 +245,7 @@ export default function MartaInventory() {
 
   const holdStatuses = ['On Hold', 'Engine', 'Body Shop', 'Vendor', 'Brakes', 'Safety'];
 
-  // --- REFINED EXCEL PARSER (Fixed Order of Operations) ---
+  // --- REFINED EXCEL PARSER ---
   const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -265,22 +263,22 @@ export default function MartaInventory() {
         const uploadQueue: any[] = [];
         const currentYear = new Date().getFullYear();
 
+        // 1. UPDATED MAPPING: Added Engineering & Brakes catch-all
         const categoryMap: { [key: string]: string } = {
             'ENGINE': 'Engine',
+            'ENGINEERING': 'Engine', // Maps Engineering -> Engine status
             'VENDOR': 'Vendor',
             'HOLD': 'On Hold',
             'BODY SHOP': 'Body Shop',
             'CODE 1 BRAKES': 'Brakes',
             'NEW BRAKES': 'Brakes',
+            'BRAKES': 'Brakes',      // Catch-all for simple 'Brakes' header
             'SERVICE CALLS': 'In Shop',
             'TRIPPER': 'Active',
             'TRIPPERS': 'Active'
         };
 
-        // Words that KILL the column processing (Red Line)
         const stopWords = ['TOTAL', 'STEAM CLEAN', 'MAJOR CLEAN', 'HYAC INSPECTION', 'DAY SHIFT'];
-        
-        // Headers that RESET the current category to null (Ignore List)
         const ignoreHeaders = ['RETORQUES', 'SHOP REPORT', 'WEEKEND LIST', 'SAFETY 1ST', 'SAFETY'];
 
         const formatOOSDate = (raw: string) => {
@@ -298,16 +296,15 @@ export default function MartaInventory() {
             let currentStatus = '';
             
             worksheet?.getColumn(col).eachCell((cell, rowNumber) => {
-                // HARD STOP: Row 40 Limit or Stop Words
                 const val = cell.value ? cell.value.toString().trim().toUpperCase() : '';
                 
+                // HARD STOP: Red Line / Row Limit
                 if (rowNumber > 40 || stopWords.some(word => val.includes(word))) {
                     if (stopWords.some(word => val.includes(word))) currentStatus = ''; 
                     return;
                 }
 
-                // --- PRIORITY 1: IS THIS A BUS? (Data) ---
-                // We check this BEFORE checking for ignore-headers to prevent "SAFETY HOLD" notes from killing the capture
+                // PRIORITY 1: IS THIS A BUS? (Capture it!)
                 if (/^\d{4}/.test(val)) {
                     if (currentStatus) {
                         const busNumber = val.substring(0, 4);
@@ -323,7 +320,7 @@ export default function MartaInventory() {
 
                         notes = notes.replace(/\([A-Z]\)/g, '').trim();
                         
-                        // Safety Override logic for specific buses
+                        // Safety Override
                         let finalStatus = currentStatus;
                         if (remainingText.toUpperCase().includes('SAFETY HOLD')) {
                             finalStatus = 'Safety';
@@ -339,17 +336,17 @@ export default function MartaInventory() {
                             timestamp: serverTimestamp()
                         });
                     }
-                    return; // Move to next row
+                    return;
                 }
 
-                // --- PRIORITY 2: IS THIS A HEADER? (Category Switch) ---
+                // PRIORITY 2: IS THIS A HEADER? (Switch Status)
                 if (categoryMap[val]) {
                     currentStatus = categoryMap[val];
                     return;
                 }
 
-                // --- PRIORITY 3: IS THIS TRASH? (Ignore List) ---
-                // Now safe to check "SAFETY" because we know it's not a bus data row
+                // PRIORITY 3: IS THIS TRASH? (Kill Status)
+                // We check this LAST so it doesn't kill "SAFETY HOLD" bus notes
                 if (ignoreHeaders.some(header => val.includes(header)) || val.length > 3) {
                     currentStatus = '';
                     return;
@@ -358,7 +355,7 @@ export default function MartaInventory() {
         }
 
         if (uploadQueue.length === 0) {
-            alert("No recognized bus data found. Please check Excel headers.");
+            alert("No recognized bus data found.");
             return;
         }
 
