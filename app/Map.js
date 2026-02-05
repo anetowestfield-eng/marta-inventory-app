@@ -4,8 +4,21 @@ import { MapContainer, TileLayer, Marker, Popup, useMap, Tooltip } from "react-l
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
-const blueIcon = L.icon({ iconUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png", shadowUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
-const greyIcon = L.icon({ iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-grey.png", shadowUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
+// Standard icon for active buses
+const blueIcon = L.icon({ 
+  iconUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png", 
+  shadowUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png", 
+  iconSize: [25, 41], 
+  iconAnchor: [12, 41] 
+});
+
+// Grey icon for buses with lost signals (Ghosts)
+const greyIcon = L.icon({ 
+  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-grey.png", 
+  shadowUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png", 
+  iconSize: [25, 41], 
+  iconAnchor: [12, 41] 
+});
 
 function MapController({ selectedBus }) {
   const map = useMap();
@@ -50,21 +63,35 @@ export default function Map({ buses = [], selectedId, routes = {} }) {
 
         const lastSeenMs = vData?.timestamp * 1000;
         const isStale = (Date.now() - lastSeenMs) > 300000;
+        const timeString = new Date(lastSeenMs).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
 
         return (
           <Marker key={id} position={[vData.position.latitude, vData.position.longitude]} icon={isStale ? greyIcon : blueIcon}>
+            {/* Tooltip displays Ghost Bus for grey markers */}
             <Tooltip direction="top" offset={[0, -40]} opacity={1}>
-              <span className="font-black text-[10px] text-[#002d72]">Bus #{busNumber} | Route {routeNum}</span>
+              <span className="font-black text-[10px] text-[#002d72]">
+                Bus #{busNumber} | {isStale ? "GHOST BUS" : `Route ${routeNum}`}
+              </span>
             </Tooltip>
+            
             <Popup>
               <div className="p-2 min-w-[200px] font-sans">
                 <div className="flex justify-between items-center border-b border-slate-100 pb-2 mb-2">
                    <p className="font-black text-[#002d72] uppercase italic text-sm">Bus #{busNumber}</p>
-                   <p className="bg-[#ef7c00] text-white text-[9px] font-black px-2 py-0.5 rounded tracking-tighter">Route {routeNum}</p>
+                   {/* Badge changes to Ghost Bus or Route Number based on signal status */}
+                   <p className={`${isStale ? 'bg-slate-500' : 'bg-[#ef7c00]'} text-white text-[9px] font-black px-2 py-0.5 rounded uppercase`}>
+                     {isStale ? "Ghost Bus" : `Route ${routeNum}`}
+                   </p>
                 </div>
-                <p className="text-[10px] font-bold text-slate-500 uppercase leading-tight mb-3">
+                
+                <p className="text-[10px] font-bold text-slate-500 uppercase leading-tight mb-2">
                     {fullRouteName.split(' - ')[1] || fullRouteName}
                 </p>
+                
+                <div className="flex justify-between items-center text-[9px] font-black text-slate-400 border-t pt-2 mt-2">
+                    <span>SIGNAL LAST SEEN:</span>
+                    <span>{timeString}</span>
+                </div>
               </div>
             </Popup>
           </Marker>
