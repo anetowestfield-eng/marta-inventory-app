@@ -33,7 +33,7 @@ export default function Map({ buses = [], selectedId, routes = {} }) {
 
         const busNumber = vehicleData?.vehicle?.label || id;
         const rawRouteId = vehicleData?.trip?.route_id;
-        const fullRouteName = routes[rawRouteId] || "Yard / Maintenance";
+        const fullRouteName = routes[rawRouteId] || "Special / Yard Move";
         const routeNum = fullRouteName.split(' - ')[0];
 
         const lastSeenMs = vehicleData?.timestamp * 1000;
