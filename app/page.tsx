@@ -19,7 +19,106 @@ const BusTracker = dynamic(() => import('./BusTracker'), {
   )
 });
 
-// RESTORED: Full Edit Form with Dates
+// --- NEW COMPONENT: Dedicated Data Entry Form ---
+const BusInputForm = () => {
+    const [formData, setFormData] = useState({
+        number: '',
+        status: 'Active',
+        location: '',
+        notes: '',
+        oosStartDate: '',
+        expectedReturnDate: '',
+        actualReturnDate: ''
+    });
+
+    const handleChange = (e: any) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!formData.number) return;
+
+        try {
+            await setDoc(doc(db, "buses", formData.number), {
+                ...formData,
+                timestamp: serverTimestamp()
+            }, { merge: true });
+            
+            alert(`Bus #${formData.number} Record Saved Successfully!`);
+            // Reset form but keep location for faster entry if needed
+            setFormData(prev => ({ ...prev, number: '', status: 'Active', notes: '' })); 
+        } catch (err) {
+            console.error(err);
+            alert("Error saving record.");
+        }
+    };
+
+    return (
+        <div className="max-w-2xl mx-auto mt-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="bg-white p-8 rounded-2xl shadow-xl border-t-8 border-[#002d72]">
+                <div className="mb-8 text-center">
+                    <h2 className="text-3xl font-black text-[#002d72] italic uppercase tracking-tighter">Data Entry Terminal</h2>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-2">Add or Update Fleet Units</p>
+                </div>
+                
+                <form onSubmit={handleSubmit} className="space-y-6">
+                    <div className="grid grid-cols-2 gap-6">
+                        <div className="col-span-1">
+                            <label className="text-[10px] font-black uppercase text-slate-500 mb-1 block">Bus Number</label>
+                            <input name="number" type="text" placeholder="e.g. 1402" className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-xl text-lg font-black text-[#002d72] outline-none focus:border-[#ef7c00] transition-all" value={formData.number} onChange={handleChange} required autoFocus />
+                        </div>
+                        <div className="col-span-1">
+                            <label className="text-[10px] font-black uppercase text-slate-500 mb-1 block">Status</label>
+                            <select name="status" className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold outline-none focus:border-[#002d72] transition-all" value={formData.status} onChange={handleChange}>
+                                <option value="Active">Ready for Service</option>
+                                <option value="On Hold">Maintenance Hold</option>
+                                <option value="In Shop">In Shop</option>
+                                <option value="Engine">Engine</option>
+                                <option value="Body Shop">Body Shop</option>
+                                <option value="Vendor">Vendor</option>
+                                <option value="Brakes">Brakes</option>
+                                <option value="Safety">Safety</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-slate-500 mb-1 block">Location</label>
+                        <input name="location" type="text" placeholder="e.g. Hamilton / Annex / Perry" className="w-full p-3 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold outline-none focus:border-[#002d72] transition-all" value={formData.location} onChange={handleChange} />
+                    </div>
+
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-slate-500 mb-1 block">Fault Details / Notes</label>
+                        <textarea name="notes" className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-medium outline-none focus:border-[#002d72] h-24 resize-none transition-all" placeholder="Enter maintenance notes..." value={formData.notes} onChange={handleChange} />
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4">
+                        <div>
+                            <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">OOS Date</label>
+                            <input name="oosStartDate" type="date" className="w-full p-2 bg-slate-50 border-2 border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-[#002d72]" value={formData.oosStartDate} onChange={handleChange} />
+                        </div>
+                        <div>
+                            <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Exp Return</label>
+                            <input name="expectedReturnDate" type="date" className="w-full p-2 bg-slate-50 border-2 border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-[#002d72]" value={formData.expectedReturnDate} onChange={handleChange} />
+                        </div>
+                        <div>
+                            <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Act Return</label>
+                            <input name="actualReturnDate" type="date" className="w-full p-2 bg-slate-50 border-2 border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-[#002d72]" value={formData.actualReturnDate} onChange={handleChange} />
+                        </div>
+                    </div>
+
+                    <button className="w-full py-4 bg-[#002d72] hover:bg-[#ef7c00] text-white rounded-xl font-black uppercase tracking-widest shadow-lg transform active:scale-95 transition-all">
+                        Save Record
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+// Reusable Edit Form Component (Popup)
 const EditBusForm = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
     return (
         <div className="bg-white p-6 rounded-xl shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-200">
@@ -51,7 +150,6 @@ const EditBusForm = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
                             value={bus.location || ''} placeholder="e.g. Hamilton"
                             onChange={async (e) => await setDoc(doc(db, "buses", bus.docId), { location: e.target.value }, { merge: true })} />
                     </div>
-                    {/* RESTORED DATE FIELD */}
                     <div>
                         <label className="text-[9px] font-black uppercase text-slate-400">OOS Start Date</label>
                         <input type="date" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold mt-1 outline-none focus:border-[#002d72] focus:bg-white transition-all" 
@@ -66,7 +164,6 @@ const EditBusForm = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
                             placeholder="Enter technical details here..." value={bus.notes || ''}
                             onChange={async (e) => await setDoc(doc(db, "buses", bus.docId), { notes: e.target.value }, { merge: true })} />
                     </div>
-                    {/* RESTORED DATE FIELDS */}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="text-[9px] font-black uppercase text-slate-400">Exp Return</label>
@@ -110,7 +207,10 @@ const EditBusForm = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
 
 export default function MartaInventory() {
   const [user, setUser] = useState<any>(null);
-  const [view, setView] = useState<'inventory' | 'tracker'>('inventory');
+  
+  // ADDED 'input' to the view state
+  const [view, setView] = useState<'inventory' | 'tracker' | 'input'>('inventory');
+  
   const [inventoryMode, setInventoryMode] = useState<'list' | 'grid'>('grid');
   const [buses, setBuses] = useState<any[]>([]);
   const [expandedBus, setExpandedBus] = useState<string | null>(null);
@@ -144,7 +244,48 @@ export default function MartaInventory() {
     setSortConfig({ key, direction });
   };
 
-  // RESTORED: Export Function
+  const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.readAsArrayBuffer(file);
+    
+    reader.onload = async () => {
+      try {
+        const buffer = reader.result as ArrayBuffer;
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(buffer);
+        const worksheet = workbook.getWorksheet(1);
+
+        const uploadQueue: any[] = [];
+        worksheet?.eachRow((row, rowNumber) => {
+          if (rowNumber === 1) return; 
+          
+          const busNum = row.getCell(1).value?.toString();
+          if (busNum) {
+            uploadQueue.push({
+              number: busNum,
+              status: row.getCell(3).value || 'Active',
+              location: row.getCell(4).value || '',
+              notes: row.getCell(5).value || '',
+              expectedReturnDate: row.getCell(6).value || '',
+              oosStartDate: row.getCell(8).value || ''
+            });
+          }
+        });
+
+        for (const data of uploadQueue) {
+          await setDoc(doc(db, "buses", data.number), data, { merge: true });
+        }
+        alert(`Successfully synced ${uploadQueue.length} units from Excel.`);
+      } catch (err) {
+        console.error("Upload Error:", err);
+        alert("Failed to process Excel file. Ensure it matches the export format.");
+      }
+    };
+  };
+
   const exportToExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Vehicle OOS Details');
@@ -261,12 +402,21 @@ export default function MartaInventory() {
             <span className="font-black text-lg italic uppercase tracking-tighter text-[#002d72]">Fleet Manager</span>
         </div>
         <div className="flex gap-6 items-center">
-          <button onClick={() => setView(view === 'inventory' ? 'tracker' : 'inventory')} className="text-[#002d72] hover:text-[#ef7c00] text-[10px] font-black uppercase transition-all tracking-widest border-b-2 border-transparent hover:border-[#ef7c00] pb-1">{view === 'inventory' ? 'Route Viewer' : 'Back to Inventory'}</button>
+            {/* NAVIGATION TABS */}
+          <button onClick={() => setView('inventory')} className={`text-[10px] font-black uppercase transition-all tracking-widest border-b-2 pb-1 ${view === 'inventory' ? 'border-[#ef7c00] text-[#002d72]' : 'border-transparent text-slate-400 hover:text-[#002d72]'}`}>Inventory</button>
+          <button onClick={() => setView('input')} className={`text-[10px] font-black uppercase transition-all tracking-widest border-b-2 pb-1 ${view === 'input' ? 'border-[#ef7c00] text-[#002d72]' : 'border-transparent text-slate-400 hover:text-[#002d72]'}`}>Data Entry</button>
+          <button onClick={() => setView('tracker')} className={`text-[10px] font-black uppercase transition-all tracking-widest border-b-2 pb-1 ${view === 'tracker' ? 'border-[#ef7c00] text-[#002d72]' : 'border-transparent text-slate-400 hover:text-[#002d72]'}`}>Route Viewer</button>
           
           <div className="h-4 w-[1px] bg-slate-200"></div>
           
-          {/* RESTORED: Export Button */}
-          <button onClick={exportToExcel} className="text-[#002d72] hover:text-[#ef7c00] text-[10px] font-black uppercase transition-all tracking-widest">Export Excel</button>
+          {/* RESTORED: Export & Upload Controls */}
+          <div className="flex gap-4">
+              <label className="text-green-600 hover:text-green-800 text-[10px] font-black uppercase transition-all tracking-widest cursor-pointer">
+                Upload Excel
+                <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
+              </label>
+              <button onClick={exportToExcel} className="text-[#002d72] hover:text-[#ef7c00] text-[10px] font-black uppercase transition-all tracking-widest">Export Excel</button>
+          </div>
           
           <button onClick={() => signOut(auth)} className="text-red-500 hover:text-red-700 text-[10px] font-black uppercase tracking-widest">Logout</button>
         </div>
@@ -275,6 +425,8 @@ export default function MartaInventory() {
       <main className="max-w-[1600px] mx-auto p-6">
         {view === 'tracker' ? (
           <div className="h-[85vh] bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative"><BusTracker /></div>
+        ) : view === 'input' ? (
+          <BusInputForm />
         ) : (
           <>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -306,7 +458,6 @@ export default function MartaInventory() {
             </div>
 
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden min-h-[500px]">
-                {/* RESTORED: List View Toggle */}
                 {inventoryMode === 'list' ? (
                     <>
                         <div className="grid grid-cols-10 gap-4 p-5 border-b border-slate-100 bg-slate-50/50 text-[9px] font-black uppercase tracking-widest text-slate-400 select-none">
