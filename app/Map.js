@@ -33,7 +33,10 @@ function MapController({ selectedBus }) {
   const map = useMap();
   useEffect(() => {
     if (selectedBus?.vehicle?.position) {
-      map.flyTo([selectedBus.vehicle.position.latitude, selectedBus.vehicle.position.longitude], 16);
+      map.flyTo(
+        [selectedBus.vehicle.position.latitude, selectedBus.vehicle.position.longitude], 
+        15, { duration: 2 }
+      );
     }
   }, [selectedBus, map]);
   return null;
@@ -41,7 +44,7 @@ function MapController({ selectedBus }) {
 
 export default function Map({ buses = [], selectedId, pinnedIds = [], routes = {} }) {
   const position = [33.7490, -84.3880];
-  const selectedBus = buses?.find?.(b => b.vehicle?.vehicle?.id === selectedId);
+  const selectedBus = buses?.find(b => b.vehicle?.vehicle?.id === selectedId);
   
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -51,7 +54,10 @@ export default function Map({ buses = [], selectedId, pinnedIds = [], routes = {
 
   return (
     <MapContainer center={position} zoom={11} style={{ height: "100%", width: "100%" }}>
-      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      <TileLayer
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='© OpenStreetMap'
+      />
       <MapController selectedBus={selectedBus} />
       
       {buses.map((bus) => {
@@ -60,43 +66,42 @@ export default function Map({ buses = [], selectedId, pinnedIds = [], routes = {
         const id = vehicle?.id;
         if (!id) return null;
 
-        // --- ENHANCED ROUTE DECODING ---
-        // MARTA sometimes hides the route ID in different places
-        const rawRouteId = (
-            vehicleData?.trip?.route_id || 
-            vehicleData?.route_id || 
-            bus.route_id
-        );
-        
+        // --- PROPER DECODING (FIXED LOOKUP) ---
+        // Checks both route_id and routeId to prevent 'undefined'
+        const rawRouteId = vehicleData?.trip?.route_id || vehicleData?.trip?.routeId;
         const cleanId = rawRouteId ? String(rawRouteId).trim() : "";
         
-        // Dictionary Lookup
-        let fullRouteName = "No Route Assigned";
-        if (cleanId && routes[cleanId]) {
-            fullRouteName = routes[cleanId];
-        } else if (cleanId) {
-            fullRouteName = `ID: ${cleanId}`; // Shows the ID if dictionary fails
-        }
-
+        const fullRouteName = (routes && routes[cleanId]) 
+          ? routes[cleanId] 
+          : (cleanId ? `ID: ${cleanId}` : "No Route Assigned");
+        
         const routeShortNumber = fullRouteName.includes(" - ") ? fullRouteName.split(' - ')[0] : fullRouteName;
         const busNumber = vehicle?.label || id;
-        const lat = vehicleData?.position?.latitude;
-        const lon = vehicleData?.position?.longitude;
+
+        const isSelected = id === selectedId;
+        const isPinned = pinnedIds.includes(id); 
+        const lat = vehicleData.position?.latitude;
+        const lon = vehicleData.position?.longitude;
         
         if (!lat || !lon) return null;
 
-        const lastSeen = vehicleData?.timestamp ? vehicleData.timestamp * 1000 : Date.now();
-        const isStale = (Date.now() - lastSeen) > 300000;
-        const timeString = new Date(lastSeen).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        // MARTA sends seconds; JS needs milliseconds
+        const lastUpdated = vehicleData?.timestamp ? vehicleData.timestamp * 1000 : Date.now();
+        const isStale = (Date.now() - lastUpdated) > 300000;
+        const timeString = new Date(lastUpdated).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
 
         return (
           <div key={id}>
-            <Marker position={[lat, lon]} icon={isStale ? greyIcon : blueIcon}>
+            <Marker 
+                position={[lat, lon]}
+                icon={isStale ? greyIcon : (isPinned ? redIcon : blueIcon)}
+            >
                 <Tooltip direction="top" offset={[0, -40]}>
-                    <span className="font-black text-[#002d72]">#{busNumber} | {routeShortNumber}</span>
+                    <span className="font-black text-[#002d72]">#{busNumber} | RT {routeShortNumber}</span>
                 </Tooltip>
+
                 <Popup>
-                    <div className="font-sans min-w-[150px]">
+                    <div className="font-sans">
                         <strong className="text-lg text-[#002d72]">Unit #{busNumber}</strong><br/>
                         <span className="font-bold text-[#ef7c00]">{fullRouteName}</span>
                         <div className="mt-2 border-t pt-2 text-[10px] text-gray-500 font-bold uppercase">

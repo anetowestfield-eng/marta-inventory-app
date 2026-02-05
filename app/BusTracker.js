@@ -11,6 +11,7 @@ export default function BusTracker() {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        // Fetch both live buses and the local routes.json
         const [vegRes, routeRes] = await Promise.all([
           fetch("/api/vehicles"),
           fetch("/api/routes")
@@ -19,8 +20,10 @@ export default function BusTracker() {
         const vehicleData = await vegRes.json();
         const routeData = await routeRes.json();
         
-        setVehicles(vehicleData?.entity || []);
-        setRoutes(routeData || {}); 
+        if (vehicleData.entity) {
+          setVehicles(vehicleData.entity);
+        }
+        setRoutes(routeData || {});
       } catch (error) {
         console.error("Error loading MARTA data:", error);
       } finally {
@@ -29,7 +32,7 @@ export default function BusTracker() {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 10000); 
+    const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -42,19 +45,21 @@ export default function BusTracker() {
   );
 
   return (
-    <div className="flex h-full bg-white overflow-hidden">
+    <div className="flex h-screen bg-white overflow-hidden text-slate-900">
+      {/* SIDEBAR */}
       <div className="w-64 bg-slate-50 border-r border-slate-200 flex flex-col">
-        <div className="p-4 bg-[#002d72] text-white flex justify-between items-center">
+        <div className="p-4 bg-[#002d72] text-white">
           <h2 className="text-[10px] font-black uppercase tracking-widest">Active Units ({vehicles.length})</h2>
         </div>
         <div className="flex-grow overflow-y-auto divide-y divide-slate-100">
           {vehicles.map((v) => {
             const busNum = v.vehicle?.vehicle?.label || v.vehicle?.vehicle?.id;
+            const id = v.vehicle?.vehicle?.id;
             return (
               <button 
-                key={v.id}
-                onClick={() => setSelectedId(v.vehicle?.vehicle?.id)}
-                className={`w-full p-3 text-left transition-colors hover:bg-white ${selectedId === v.vehicle?.vehicle?.id ? 'bg-blue-100 border-l-4 border-[#002d72]' : ''}`}
+                key={id}
+                onClick={() => setSelectedId(id)}
+                className={`w-full p-3 text-left transition-colors hover:bg-white ${selectedId === id ? 'bg-blue-100 border-l-4 border-[#002d72]' : ''}`}
               >
                 <span className="font-black text-slate-700 text-sm italic">#{busNum}</span>
               </button>
@@ -62,6 +67,7 @@ export default function BusTracker() {
           })}
         </div>
       </div>
+
       <div className="flex-grow relative">
         <Map buses={vehicles} selectedId={selectedId} routes={routes} />
       </div>
