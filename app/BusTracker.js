@@ -7,8 +7,10 @@ export default function BusTracker() {
   const [routes, setRoutes] = useState({});
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
+  
+  // --- RESTORED CONTROLS STATE ---
   const [searchTerm, setSearchTerm] = useState("");
-  const [sortBy, setSortBy] = useState("unit");
+  const [sortBy, setSortBy] = useState("unit"); // 'unit' or 'route'
 
   useEffect(() => {
     const fetchData = async () => {
@@ -46,22 +48,30 @@ export default function BusTracker() {
     return { total, active, hold: total - active };
   }, [vehicles]);
 
-  // Search & Sorting Logic
+  // --- SEARCH & SORT LOGIC ---
   const processedVehicles = useMemo(() => {
+    // 1. Filter by Search Term
     let filtered = vehicles.filter(v => {
       const busNum = (v.vehicle?.vehicle?.label || v.vehicle?.vehicle?.id || "").toLowerCase();
       return busNum.includes(searchTerm.toLowerCase());
     });
 
+    // 2. Sort Logic
     return filtered.sort((a, b) => {
       if (sortBy === "route") {
+        // Get clean Route IDs
         const idA = a.vehicle?.trip?.route_id || a.vehicle?.trip?.routeId;
         const idB = b.vehicle?.trip?.route_id || b.vehicle?.trip?.routeId;
-        // Use clean strings for comparison
-        const routeA = idA ? String(idA).trim() : "999";
-        const routeB = idB ? String(idB).trim() : "999";
+        const cleanA = idA ? String(idA).trim() : "";
+        const cleanB = idB ? String(idB).trim() : "";
+        
+        // Get Route Names (or use "999" to push unknown routes to the bottom)
+        const routeA = (routes && cleanA && routes[cleanA]) ? routes[cleanA] : "zzz";
+        const routeB = (routes && cleanB && routes[cleanB]) ? routes[cleanB] : "zzz";
+        
         return routeA.localeCompare(routeB);
       }
+      // Default: Sort by Bus Number
       return (a.vehicle?.vehicle?.label || "").localeCompare(b.vehicle?.vehicle?.label || "");
     });
   }, [vehicles, routes, searchTerm, sortBy]);
@@ -70,7 +80,7 @@ export default function BusTracker() {
 
   return (
     <div className="flex flex-col h-screen bg-white text-slate-900">
-      {/* METRICS HEADER */}
+      {/* HEADER WITH METRICS & CONTROLS */}
       <div className="flex items-center justify-between px-6 py-4 bg-[#002d72] text-white shadow-xl z-10">
         <div className="flex gap-10">
           <div><p className="text-[9px] font-bold opacity-50 uppercase tracking-widest">Total Fleet</p><p className="text-xl font-black">{stats.total}</p></div>
@@ -78,16 +88,19 @@ export default function BusTracker() {
           <div><p className="text-[9px] font-bold opacity-50 uppercase tracking-widest text-[#ef7c00]">OOS / On Hold</p><p className="text-xl font-black text-[#ef7c00]">{stats.hold}</p></div>
         </div>
         
+        {/* --- RESTORED SEARCH & SORT BAR --- */}
         <div className="flex items-center gap-3">
           <input 
             type="text" 
             placeholder="Search Bus #..."
-            className="bg-white/10 border border-white/20 rounded px-3 py-1.5 text-xs font-bold outline-none placeholder:text-white/40 focus:bg-white/20 transition-all w-40"
+            value={searchTerm}
+            className="bg-white/10 border border-white/20 rounded px-3 py-1.5 text-xs font-bold outline-none placeholder:text-white/40 focus:bg-white/20 transition-all w-40 text-white"
             onChange={(e) => setSearchTerm(e.target.value)}
           />
           <select 
+            value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
-            className="bg-[#002d72] text-[10px] font-black uppercase p-2 rounded border border-white/30 outline-none cursor-pointer"
+            className="bg-[#002d72] text-[10px] font-black uppercase p-2 rounded border border-white/30 outline-none cursor-pointer hover:bg-white/10 transition-colors"
           >
             <option value="unit">Sort: Bus #</option>
             <option value="route">Sort: Route</option>
@@ -96,25 +109,21 @@ export default function BusTracker() {
       </div>
 
       <div className="flex flex-grow overflow-hidden">
-        {/* SIDEBAR */}
+        {/* SIDEBAR LIST */}
         <div className="w-80 bg-slate-50 border-r border-slate-200 flex flex-col shadow-inner">
           <div className="flex-grow overflow-y-auto">
             {processedVehicles.map((v) => {
               const vehicle = v.vehicle;
               const busNum = vehicle?.vehicle?.label || vehicle?.vehicle?.id;
               
-              // --- SIDEBAR ROUTE LOGIC ---
               const rId = vehicle?.trip?.route_id || vehicle?.trip?.routeId;
               const cleanId = rId ? String(rId).trim() : "";
               
-              // Lookup Name OR Fallback to "Route [ID]"
               let displayRoute = "Special / Yard Move";
               if (routes && cleanId && routes[cleanId]) {
-                 // Use the dictionary name (e.g. "191 - Riverdale")
                  const name = routes[cleanId];
                  displayRoute = name.split(' - ')[1] || name; 
               } else if (cleanId) {
-                 // Fallback: "Route 26862" instead of "ID: 26862"
                  displayRoute = `Route ${cleanId}`;
               }
 
@@ -140,6 +149,7 @@ export default function BusTracker() {
           </div>
         </div>
 
+        {/* MAP AREA */}
         <div className="flex-grow relative">
           <Map buses={vehicles} selectedId={selectedId} routes={routes} />
         </div>
