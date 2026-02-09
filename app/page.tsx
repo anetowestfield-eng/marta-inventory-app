@@ -21,6 +21,7 @@ const BusTracker = dynamic(() => import('./BusTracker'), {
 
 // --- HELPER: LOG HISTORY TO FIREBASE ---
 const logHistory = async (busNumber: string, action: string, details: string, userEmail: string) => {
+    if (!busNumber) return;
     try {
         await addDoc(collection(db, "buses", busNumber, "history"), {
             action,
@@ -33,7 +34,7 @@ const logHistory = async (busNumber: string, action: string, details: string, us
     }
 };
 
-// --- COMPONENT: Bus Details with SMART LOGGING ---
+// --- COMPONENT: Bus Details with ROBUST LOGGING ---
 const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
@@ -63,29 +64,33 @@ const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
         setEditData(prev => ({ ...prev, [name]: value }));
     };
 
+    // --- UPDATED SAVE FUNCTION ---
     const handleSave = async () => {
         try {
-            // 1. CALCULATE CHANGES (Old vs New)
+            // 1. Fetch FRESH data from DB to ensure accurate comparison
+            const busRef = doc(db, "buses", bus.number);
+            const busSnap = await getDoc(busRef);
+            const currentDbData = busSnap.exists() ? busSnap.data() : {};
+
+            // 2. Calculate Changes
             const changes = [];
-            if (bus.status !== editData.status) changes.push(`Status: ${bus.status} -> ${editData.status}`);
-            if (bus.location !== editData.location) changes.push(`Loc: ${bus.location || 'Blank'} -> ${editData.location}`);
-            if (bus.notes !== editData.notes) changes.push(`Notes Updated`);
-            if (bus.oosStartDate !== editData.oosStartDate) changes.push(`OOS Date: ${bus.oosStartDate || 'None'} -> ${editData.oosStartDate}`);
-            if (bus.expectedReturnDate !== editData.expectedReturnDate) changes.push(`Exp Return: ${bus.expectedReturnDate || 'None'} -> ${editData.expectedReturnDate}`);
-            if (bus.actualReturnDate !== editData.actualReturnDate) changes.push(`Act Return: ${bus.actualReturnDate || 'None'} -> ${editData.actualReturnDate}`);
+            if (currentDbData.status !== editData.status) changes.push(`Status: ${currentDbData.status || 'Active'} -> ${editData.status}`);
+            if (currentDbData.location !== editData.location) changes.push(`Loc: ${currentDbData.location || 'Blank'} -> ${editData.location}`);
+            if (currentDbData.notes !== editData.notes) changes.push(`Notes Updated`);
+            if (currentDbData.oosStartDate !== editData.oosStartDate) changes.push(`OOS: ${currentDbData.oosStartDate || 'None'} -> ${editData.oosStartDate}`);
+            if (currentDbData.expectedReturnDate !== editData.expectedReturnDate) changes.push(`Exp: ${currentDbData.expectedReturnDate || 'None'} -> ${editData.expectedReturnDate}`);
+            if (currentDbData.actualReturnDate !== editData.actualReturnDate) changes.push(`Act: ${currentDbData.actualReturnDate || 'None'} -> ${editData.actualReturnDate}`);
 
-            const logMessage = changes.length > 0 ? changes.join(' | ') : "No changes detected.";
+            const logMessage = changes.length > 0 ? changes.join(' | ') : "Routine Update (No specific changes detected)";
 
-            // 2. SAVE DATA
-            await setDoc(doc(db, "buses", bus.number), {
+            // 3. Update DB
+            await setDoc(busRef, {
                 ...editData,
                 timestamp: serverTimestamp()
             }, { merge: true });
 
-            // 3. LOG HISTORY with the specific changes
-            if (changes.length > 0) {
-                await logHistory(bus.number, "EDIT", logMessage, auth.currentUser?.email || 'Unknown');
-            }
+            // 4. Log History
+            await logHistory(bus.number, "EDIT", logMessage, auth.currentUser?.email || 'Unknown');
             
             setIsEditing(false);
         } catch (err) {
@@ -299,7 +304,7 @@ const BusInputForm = () => {
         try {
             const busRef = doc(db, "buses", formData.number);
             
-            // 1. GET OLD DATA (Strict Validation & History comparison)
+            // 1. GET OLD DATA
             const busSnap = await getDoc(busRef);
             
             if (!busSnap.exists()) {
@@ -311,10 +316,10 @@ const BusInputForm = () => {
 
             // 2. CALCULATE CHANGES
             const changes = [];
-            if (oldData.status !== formData.status) changes.push(`Status: ${oldData.status} -> ${formData.status}`);
+            if (oldData.status !== formData.status) changes.push(`Status: ${oldData.status || 'Active'} -> ${formData.status}`);
             if (oldData.location !== formData.location) changes.push(`Loc: ${oldData.location || 'Blank'} -> ${formData.location}`);
             if (oldData.notes !== formData.notes) changes.push(`Notes Updated`);
-            // Add other fields if needed
+            if (oldData.oosStartDate !== formData.oosStartDate) changes.push(`OOS: ${oldData.oosStartDate || 'None'} -> ${formData.oosStartDate}`);
 
             const logMessage = changes.length > 0 ? changes.join(' | ') : "Update from Data Entry Terminal";
 
