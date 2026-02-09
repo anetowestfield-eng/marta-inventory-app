@@ -136,7 +136,7 @@ const AnalyticsDashboard = ({ buses }: { buses: any[] }) => {
                 </div>
             </div>
             <div className="bg-white p-8 rounded-2xl shadow-lg border border-slate-200">
-                <h3 className="text-xl font-black text-[#002d72] uppercase mb-6 flex items-center gap-2"><span>👑</span> Top "Shop Queens" (High Activity)</h3>
+                <h3 className="text-xl font-black text-[#002d72] uppercase mb-6 flex items-center gap-2"> Top "Shop Buses" (High Activity)</h3>
                 <div className="space-y-4">
                     {shopQueens.map((queen, i) => (
                         <div key={i} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
