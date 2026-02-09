@@ -33,7 +33,7 @@ const logHistory = async (busNumber: string, action: string, details: string, us
     }
 };
 
-// --- COMPONENT: Bus Details (Edit & Clear Data) ---
+// --- COMPONENT: Bus Details with SMART LOGGING ---
 const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
@@ -65,12 +65,27 @@ const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
 
     const handleSave = async () => {
         try {
+            // 1. CALCULATE CHANGES (Old vs New)
+            const changes = [];
+            if (bus.status !== editData.status) changes.push(`Status: ${bus.status} -> ${editData.status}`);
+            if (bus.location !== editData.location) changes.push(`Loc: ${bus.location || 'Blank'} -> ${editData.location}`);
+            if (bus.notes !== editData.notes) changes.push(`Notes Updated`);
+            if (bus.oosStartDate !== editData.oosStartDate) changes.push(`OOS Date: ${bus.oosStartDate || 'None'} -> ${editData.oosStartDate}`);
+            if (bus.expectedReturnDate !== editData.expectedReturnDate) changes.push(`Exp Return: ${bus.expectedReturnDate || 'None'} -> ${editData.expectedReturnDate}`);
+            if (bus.actualReturnDate !== editData.actualReturnDate) changes.push(`Act Return: ${bus.actualReturnDate || 'None'} -> ${editData.actualReturnDate}`);
+
+            const logMessage = changes.length > 0 ? changes.join(' | ') : "No changes detected.";
+
+            // 2. SAVE DATA
             await setDoc(doc(db, "buses", bus.number), {
                 ...editData,
                 timestamp: serverTimestamp()
             }, { merge: true });
 
-            await logHistory(bus.number, "EDIT", `Details updated. Status: ${editData.status}`, auth.currentUser?.email || 'Unknown');
+            // 3. LOG HISTORY with the specific changes
+            if (changes.length > 0) {
+                await logHistory(bus.number, "EDIT", logMessage, auth.currentUser?.email || 'Unknown');
+            }
             
             setIsEditing(false);
         } catch (err) {
@@ -79,11 +94,9 @@ const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
         }
     };
 
-    // --- NEW: CLEAR DATA FUNCTION (Does NOT delete bus, just resets fields) ---
     const handleClearData = async () => {
         if (confirm(`⚠️ Clear all maintenance data for Bus #${bus.number}?\n\nThis will reset it to 'Active' and remove notes. The bus will remain in the fleet list.`)) {
             try {
-                // Reset fields to empty/active
                 await setDoc(doc(db, "buses", bus.number), {
                     status: 'Active',
                     location: '',
@@ -94,7 +107,6 @@ const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
                     timestamp: serverTimestamp()
                 }, { merge: true });
 
-                // Log the Reset
                 await logHistory(bus.number, "RESET", "Cleared all data. Unit reset to Active.", auth.currentUser?.email || 'Unknown');
                 
                 setIsEditing(false);
@@ -133,7 +145,7 @@ const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
                                         {log.timestamp?.toDate().toLocaleDateString()} {log.timestamp?.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                     </span>
                                 </div>
-                                <p className="text-xs font-bold text-slate-700 mt-1">{log.details}</p>
+                                <p className="text-xs font-bold text-slate-700 mt-1 break-words">{log.details}</p>
                                 <p className="text-[9px] text-slate-400 italic text-right border-t border-slate-100 pt-1 mt-1">
                                     User: {log.user}
                                 </p>
@@ -195,7 +207,6 @@ const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
                     </div>
 
                     <div className="flex gap-4 mt-6">
-                        {/* RED CLEAR BUTTON */}
                         <button onClick={handleClearData} className="w-1/3 py-3 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl font-black uppercase tracking-widest shadow-sm transition-all border border-red-200">
                             Clear Data
                         </button>
@@ -288,7 +299,7 @@ const BusInputForm = () => {
         try {
             const busRef = doc(db, "buses", formData.number);
             
-            // STRICT VALIDATION: Check if bus exists
+            // 1. GET OLD DATA (Strict Validation & History comparison)
             const busSnap = await getDoc(busRef);
             
             if (!busSnap.exists()) {
@@ -296,12 +307,25 @@ const BusInputForm = () => {
                 return;
             }
 
+            const oldData = busSnap.data();
+
+            // 2. CALCULATE CHANGES
+            const changes = [];
+            if (oldData.status !== formData.status) changes.push(`Status: ${oldData.status} -> ${formData.status}`);
+            if (oldData.location !== formData.location) changes.push(`Loc: ${oldData.location || 'Blank'} -> ${formData.location}`);
+            if (oldData.notes !== formData.notes) changes.push(`Notes Updated`);
+            // Add other fields if needed
+
+            const logMessage = changes.length > 0 ? changes.join(' | ') : "Update from Data Entry Terminal";
+
+            // 3. UPDATE DB
             await setDoc(busRef, {
                 ...formData,
                 timestamp: serverTimestamp()
             }, { merge: true });
             
-            await logHistory(formData.number, "UPDATE", `Manual update via Data Entry Terminal. Status: ${formData.status}`, auth.currentUser?.email || 'Unknown');
+            // 4. LOG HISTORY
+            await logHistory(formData.number, "UPDATE", logMessage, auth.currentUser?.email || 'Unknown');
 
             alert(`Bus #${formData.number} Record Updated Successfully!`);
             setFormData(prev => ({ ...prev, number: '', status: 'Active', notes: '' })); 
