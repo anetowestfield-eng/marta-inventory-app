@@ -11,6 +11,10 @@ export default function BusTracker() {
   const [sortBy, setSortBy] = useState("unit");
   const [filterStatus, setFilterStatus] = useState("all");
 
+  // --- CONFIGURATION: TIME BEFORE BUS DISAPPEARS ---
+  // Formerly 300000 (5 mins). Now set to 1 Year (essentially never).
+  const GHOST_TIMEOUT = 31536000000; 
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -22,6 +26,7 @@ export default function BusTracker() {
         const routeData = await routeRes.json();
         
         setVehicles(prev => {
+          // This Map logic ensures we KEEP old buses and UPDATE existing ones
           const fleetMap = new window.Map(prev.map(v => [v.id, v]));
           vehicleData.entity?.forEach(v => fleetMap.set(v.id, v));
           return Array.from(fleetMap.values());
@@ -41,14 +46,17 @@ export default function BusTracker() {
 
   const stats = useMemo(() => {
     const total = vehicles.length;
-    const active = vehicles.filter(v => (Date.now() - (v.vehicle?.timestamp * 1000)) < 300000).length;
-    return { total, active, ghost: total - active }; // Stats for the Ghost count
+    // Updated to use the 1-Year timeout
+    const active = vehicles.filter(v => (Date.now() - (v.vehicle?.timestamp * 1000)) < GHOST_TIMEOUT).length;
+    return { total, active, ghost: total - active }; 
   }, [vehicles]);
 
   const processedVehicles = useMemo(() => {
     let filtered = vehicles.filter(v => {
       const lastSeen = v.vehicle?.timestamp * 1000;
-      const isStale = (Date.now() - lastSeen) > 300000;
+      // Updated to use the 1-Year timeout
+      const isStale = (Date.now() - lastSeen) > GHOST_TIMEOUT;
+      
       if (filterStatus === 'active') return !isStale;
       if (filterStatus === 'hold') return isStale;
       return true;
@@ -77,7 +85,7 @@ export default function BusTracker() {
 
   return (
     <div className="flex flex-col h-screen bg-white text-slate-900 overflow-hidden">
-      {/* SLENDER HEADER - UPDATED LABEL TO GHOST BUS */}
+      {/* SLENDER HEADER */}
       <div className="flex-none flex items-center justify-between px-6 py-2 bg-[#002d72] text-white shadow-xl z-[2000] relative">
         <div className="flex gap-4">
           <button onClick={() => setFilterStatus("all")} className={`flex flex-col items-start px-3 py-0.5 rounded transition-all border ${filterStatus === 'all' ? 'bg-white/20 border-white' : 'border-transparent hover:bg-white/10'}`}>
@@ -89,7 +97,6 @@ export default function BusTracker() {
             <p className="text-lg font-black text-green-400">{stats.active}</p>
           </button>
           
-          {/* Label changed from 'ON HOLD' to 'GHOST BUS' */}
           <button onClick={() => setFilterStatus("hold")} className={`flex flex-col items-start px-3 py-0.5 rounded transition-all border ${filterStatus === 'hold' ? 'bg-orange-900/40 border-[#ef7c00]' : 'border-transparent hover:bg-white/10'}`}>
             <p className="text-[8px] font-bold opacity-70 uppercase text-[#ef7c00]">Ghost Bus</p>
             <p className="text-lg font-black text-[#ef7c00]">{stats.ghost}</p>
@@ -126,7 +133,7 @@ export default function BusTracker() {
                   routeInfo = `Route ${cleanId}`;
               }
               const lastSeenMs = vehicle?.timestamp * 1000;
-              const isStale = (Date.now() - lastSeenMs) > 300000;
+              const isStale = (Date.now() - lastSeenMs) > GHOST_TIMEOUT;
 
               return (
                 <button key={v.id} onClick={() => setSelectedId(vehicle?.vehicle?.id)} className={`w-full p-3 text-left border-b border-slate-100 flex items-center justify-between group ${selectedId === vehicle?.vehicle?.id ? 'bg-blue-50 border-l-4 border-[#002d72]' : 'hover:bg-white border-l-4 border-transparent'}`}>
