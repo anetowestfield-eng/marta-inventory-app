@@ -1,8 +1,7 @@
 "use client";
 import React, { useState, useEffect } from 'react';
 import { db, auth } from './firebaseConfig'; 
-// Added deleteDoc to imports
-import { collection, onSnapshot, query, orderBy, doc, serverTimestamp, setDoc, deleteDoc, writeBatch, getDocs } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc, serverTimestamp, setDoc, writeBatch, getDocs, getDoc, addDoc } from "firebase/firestore";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
@@ -20,10 +19,25 @@ const BusTracker = dynamic(() => import('./BusTracker'), {
   )
 });
 
-// --- COMPONENT: Bus Details with EDIT & DELETE ---
+// --- HELPER: LOG HISTORY TO FIREBASE ---
+const logHistory = async (busNumber: string, action: string, details: string, userEmail: string) => {
+    try {
+        await addDoc(collection(db, "buses", busNumber, "history"), {
+            action,
+            details,
+            user: userEmail,
+            timestamp: serverTimestamp()
+        });
+    } catch (err) {
+        console.error("Failed to log history", err);
+    }
+};
+
+// --- COMPONENT: Bus Details (Edit & Clear Data) ---
 const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
+    const [historyLogs, setHistoryLogs] = useState<any[]>([]); 
     
     const [editData, setEditData] = useState({
         status: bus.status || 'Active',
@@ -34,7 +48,15 @@ const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
         actualReturnDate: bus.actualReturnDate || ''
     });
 
-    const historyLog: any[] = []; 
+    useEffect(() => {
+        if (showHistory) {
+            const q = query(collection(db, "buses", bus.number, "history"), orderBy("timestamp", "desc"));
+            const unsubscribe = onSnapshot(q, (snapshot) => {
+                setHistoryLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            });
+            return () => unsubscribe();
+        }
+    }, [showHistory, bus.number]);
 
     const handleChange = (e: any) => {
         const { name, value } = e.target;
@@ -47,6 +69,9 @@ const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
                 ...editData,
                 timestamp: serverTimestamp()
             }, { merge: true });
+
+            await logHistory(bus.number, "EDIT", `Details updated. Status: ${editData.status}`, auth.currentUser?.email || 'Unknown');
+            
             setIsEditing(false);
         } catch (err) {
             console.error("Error updating bus:", err);
@@ -54,40 +79,64 @@ const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
         }
     };
 
-    // --- NEW DELETE FUNCTION ---
-    const handleDelete = async () => {
-        if (confirm(`⚠️ ARE YOU SURE you want to delete Bus #${bus.number}?\n\nThis action cannot be undone.`)) {
+    // --- NEW: CLEAR DATA FUNCTION (Does NOT delete bus, just resets fields) ---
+    const handleClearData = async () => {
+        if (confirm(`⚠️ Clear all maintenance data for Bus #${bus.number}?\n\nThis will reset it to 'Active' and remove notes. The bus will remain in the fleet list.`)) {
             try {
-                await deleteDoc(doc(db, "buses", bus.number));
-                onClose(); // Close modal after delete
+                // Reset fields to empty/active
+                await setDoc(doc(db, "buses", bus.number), {
+                    status: 'Active',
+                    location: '',
+                    notes: '',
+                    oosStartDate: '',
+                    expectedReturnDate: '',
+                    actualReturnDate: '',
+                    timestamp: serverTimestamp()
+                }, { merge: true });
+
+                // Log the Reset
+                await logHistory(bus.number, "RESET", "Cleared all data. Unit reset to Active.", auth.currentUser?.email || 'Unknown');
+                
+                setIsEditing(false);
+                onClose();
             } catch (err) {
-                console.error("Error deleting bus:", err);
-                alert("Failed to delete bus.");
+                console.error("Error clearing bus:", err);
+                alert("Failed to clear data.");
             }
         }
     };
 
     if (showHistory) {
         return (
-            <div className="bg-white p-6 rounded-xl shadow-2xl border border-slate-200 w-full max-w-lg h-[500px] flex flex-col animate-in zoom-in-95">
+            <div className="bg-white p-6 rounded-xl shadow-2xl border border-slate-200 w-full max-w-lg h-[600px] flex flex-col animate-in zoom-in-95">
                 <div className="flex justify-between items-center mb-4 border-b pb-4">
-                    <h3 className="text-xl font-black text-[#002d72] uppercase">History: Bus #{bus.number}</h3>
+                    <div>
+                        <h3 className="text-xl font-black text-[#002d72] uppercase">Audit Log</h3>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Bus #{bus.number}</p>
+                    </div>
                     <button onClick={() => setShowHistory(false)} className="text-sm font-bold text-slate-400 hover:text-[#002d72]">Back</button>
                 </div>
-                <div className="flex-grow overflow-y-auto space-y-3">
-                    {historyLog.length === 0 ? (
+                <div className="flex-grow overflow-y-auto space-y-3 pr-2">
+                    {historyLogs.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-48 text-slate-300">
                             <span className="text-4xl mb-2">📂</span>
                             <p className="text-[10px] font-black uppercase tracking-widest">No History Records Found</p>
                         </div>
                     ) : (
-                        historyLog.map((log, i) => (
-                            <div key={i} className="p-3 bg-slate-50 rounded-lg border border-slate-100">
-                                <div className="flex justify-between text-[10px] font-black uppercase text-slate-400 mb-1">
-                                    <span>{log.date}</span>
-                                    <span>{log.type}</span>
+                        historyLogs.map((log) => (
+                            <div key={log.id} className="p-3 bg-slate-50 rounded-lg border border-slate-100 flex flex-col gap-1">
+                                <div className="flex justify-between items-center">
+                                    <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded text-white ${log.action === 'RESET' ? 'bg-red-500' : 'bg-blue-500'}`}>
+                                        {log.action || 'UPDATE'}
+                                    </span>
+                                    <span className="text-[9px] font-bold text-slate-400">
+                                        {log.timestamp?.toDate().toLocaleDateString()} {log.timestamp?.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                    </span>
                                 </div>
-                                <p className="text-sm font-bold text-slate-700">{log.event}</p>
+                                <p className="text-xs font-bold text-slate-700 mt-1">{log.details}</p>
+                                <p className="text-[9px] text-slate-400 italic text-right border-t border-slate-100 pt-1 mt-1">
+                                    User: {log.user}
+                                </p>
                             </div>
                         ))
                     )}
@@ -145,14 +194,21 @@ const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
                         </div>
                     </div>
 
-                    <button onClick={handleSave} className="w-full py-3 bg-[#002d72] hover:bg-[#ef7c00] text-white rounded-xl font-black uppercase tracking-widest shadow-lg mt-4 transition-all">
-                        Save Changes
-                    </button>
+                    <div className="flex gap-4 mt-6">
+                        {/* RED CLEAR BUTTON */}
+                        <button onClick={handleClearData} className="w-1/3 py-3 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl font-black uppercase tracking-widest shadow-sm transition-all border border-red-200">
+                            Clear Data
+                        </button>
+                        <button onClick={handleSave} className="w-2/3 py-3 bg-[#002d72] hover:bg-[#ef7c00] text-white rounded-xl font-black uppercase tracking-widest shadow-lg transition-all">
+                            Save Changes
+                        </button>
+                    </div>
                 </div>
             </div>
         );
     }
 
+    // --- RENDER READ-ONLY MODE ---
     return (
         <div className="bg-white p-8 rounded-xl shadow-2xl border border-slate-200 w-full max-w-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-start mb-8 border-b border-slate-100 pb-6">
@@ -193,13 +249,9 @@ const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
 
             <div className="flex justify-between items-center pt-6 border-t border-slate-100">
                 <button onClick={() => setShowHistory(true)} className="flex items-center gap-2 px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-black uppercase transition-all">
-                    <span>📜</span> View History
+                    <span>📜</span> View Audit Log
                 </button>
                 <div className="flex gap-3">
-                    {/* NEW DELETE BUTTON */}
-                    <button onClick={handleDelete} className="px-6 py-3 bg-red-50 text-red-500 hover:bg-red-500 hover:text-white rounded-lg text-xs font-black uppercase transition-all">
-                        Delete
-                    </button>
                     <button onClick={() => setIsEditing(true)} className="px-6 py-3 bg-slate-100 hover:bg-slate-200 text-[#002d72] rounded-lg text-xs font-black uppercase transition-all">
                         Edit
                     </button>
@@ -212,6 +264,7 @@ const BusDetailView = ({ bus, onClose }: { bus: any; onClose: () => void }) => {
     );
 };
 
+// --- COMPONENT: Data Entry Form ---
 const BusInputForm = () => {
     const [formData, setFormData] = useState({
         number: '',
@@ -233,12 +286,24 @@ const BusInputForm = () => {
         if (!formData.number) return;
 
         try {
-            await setDoc(doc(db, "buses", formData.number), {
+            const busRef = doc(db, "buses", formData.number);
+            
+            // STRICT VALIDATION: Check if bus exists
+            const busSnap = await getDoc(busRef);
+            
+            if (!busSnap.exists()) {
+                alert(`⛔ ACCESS DENIED: Bus #${formData.number} is not in the fleet registry.\n\nYou cannot create new buses here. Contact the administrator.`);
+                return;
+            }
+
+            await setDoc(busRef, {
                 ...formData,
                 timestamp: serverTimestamp()
             }, { merge: true });
             
-            alert(`Bus #${formData.number} Saved!`);
+            await logHistory(formData.number, "UPDATE", `Manual update via Data Entry Terminal. Status: ${formData.status}`, auth.currentUser?.email || 'Unknown');
+
+            alert(`Bus #${formData.number} Record Updated Successfully!`);
             setFormData(prev => ({ ...prev, number: '', status: 'Active', notes: '' })); 
         } catch (err) {
             console.error(err);
@@ -277,7 +342,7 @@ const BusInputForm = () => {
             <div className="bg-white p-8 rounded-2xl shadow-xl border-t-8 border-[#002d72]">
                 <div className="mb-8 text-center">
                     <h2 className="text-3xl font-black text-[#002d72] italic uppercase tracking-tighter">Data Entry Terminal</h2>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-2">Add or Update Fleet Units</p>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-2">Update Fleet Units</p>
                 </div>
                 
                 <form onSubmit={handleSubmit} className="space-y-6">
@@ -327,7 +392,7 @@ const BusInputForm = () => {
                     </div>
 
                     <button className="w-full py-4 bg-[#002d72] hover:bg-[#ef7c00] text-white rounded-xl font-black uppercase tracking-widest shadow-lg transform active:scale-95 transition-all">
-                        Save Record
+                        Update Record
                     </button>
                 </form>
 
@@ -477,7 +542,7 @@ export default function MartaInventory() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-[#ef7c00] selection:text-white relative">
       
-      {/* DISPLAY MODAL (Read Only with Edit & Delete) */}
+      {/* DISPLAY MODAL (Read Only with Edit Toggle) */}
       {inventoryMode === 'grid' && selectedBusDetail && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
             <BusDetailView bus={selectedBusDetail} onClose={() => setSelectedBusDetail(null)} />
