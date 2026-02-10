@@ -59,79 +59,14 @@ const logHistory = async (busNumber: string, action: string, details: string, us
     }
 };
 
-// --- COMPONENT: PARTS INVENTORY (With Auto-Loader) ---
+// --- COMPONENT: PARTS INVENTORY (With CSV Import) ---
 const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success'|'error') => void }) => {
     const [parts, setParts] = useState<any[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [newPart, setNewPart] = useState({ name: '', partNumber: '', quantity: 0, bin: '', type: 'Universal' });
-    const hasCheckedDb = useRef(false); // Prevents double firing
-
-    // --- AUTO-LOADER LOGIC ---
-    useEffect(() => {
-        const checkAndSeedDatabase = async () => {
-            if (hasCheckedDb.current) return;
-            hasCheckedDb.current = true;
-
-            const partsRef = collection(db, "parts");
-            const snapshot = await getDocs(partsRef);
-
-            if (snapshot.empty) {
-                // DB is empty, load defaults
-                console.log("Database empty. Seeding defaults...");
-                const commonParts = [
-                    // FILTERS
-                    { name: "Oil Filter (Cummins ISL)", partNumber: "LF9009", bin: "A-01", type: "Engine", quantity: 12 },
-                    { name: "Fuel Filter (Davco)", partNumber: "FS1000", bin: "A-02", type: "Engine", quantity: 8 },
-                    { name: "Air Filter (Primary)", partNumber: "P607955", bin: "A-04", type: "Engine", quantity: 4 },
-                    { name: "Coolant Filter", partNumber: "WF2071", bin: "A-05", type: "Engine", quantity: 6 },
-                    
-                    // BRAKES
-                    { name: "Brake Chamber (Rear)", partNumber: "3030-STD", bin: "B-10", type: "Universal", quantity: 10 },
-                    { name: "Brake Drum (Rear)", partNumber: "3600A", bin: "B-12", type: "Universal", quantity: 4 },
-                    { name: "Brake Pads (K-Meritor)", partNumber: "K-1298", bin: "B-14", type: "Universal", quantity: 20 },
-                    { name: "Slack Adjuster", partNumber: "400-10211", bin: "B-15", type: "Universal", quantity: 6 },
-                    { name: "ABS Sensor (Front)", partNumber: "441-032", bin: "B-18", type: "Universal", quantity: 5 },
-
-                    // GILLIG
-                    { name: "Headlight Assy (Low Beam)", partNumber: "82-19283", bin: "C-01", type: "Gillig", quantity: 3 },
-                    { name: "Mirror Head (Left)", partNumber: "70-1200", bin: "C-03", type: "Gillig", quantity: 2 },
-                    { name: "Wiper Motor (Front)", partNumber: "55-9012", bin: "C-05", type: "Gillig", quantity: 1 },
-                    
-                    // NEW FLYER
-                    { name: "Bumper Corner (Front Right)", partNumber: "NF-9921", bin: "D-01", type: "New Flyer", quantity: 1 },
-                    { name: "Lower Skirt Panel", partNumber: "NF-3021", bin: "D-03", type: "New Flyer", quantity: 2 },
-                    { name: "Charge Air Cooler", partNumber: "NF-CAC-01", bin: "D-05", type: "New Flyer", quantity: 0 },
-                    
-                    // ELECTRICAL
-                    { name: "24V Alternator (Niehoff)", partNumber: "C803", bin: "E-01", type: "Engine", quantity: 2 },
-                    { name: "Starter Motor (Delco)", partNumber: "39MT", bin: "E-02", type: "Engine", quantity: 2 },
-                    { name: "Nox Sensor (Outlet)", partNumber: "4326872", bin: "E-05", type: "Engine", quantity: 3 },
-                    
-                    // FLUIDS
-                    { name: "DEF Fluid (Jug)", partNumber: "DEF-2.5", bin: "F-01", type: "Universal", quantity: 50 },
-                    { name: "15W-40 Oil (Gallon)", partNumber: "ROTELLA-T", bin: "F-02", type: "Engine", quantity: 20 },
-                    { name: "Wiper Blade (28 inch)", partNumber: "WB-28", bin: "F-10", type: "Universal", quantity: 15 }
-                ];
-
-                try {
-                    const batch = writeBatch(db);
-                    commonParts.forEach(part => {
-                        const docRef = doc(collection(db, "parts"));
-                        batch.set(docRef, { ...part, timestamp: serverTimestamp() });
-                    });
-                    await batch.commit();
-                    showToast("Database seeded with default parts!", 'success');
-                } catch(err) {
-                    console.error("Auto-seed failed", err);
-                }
-            }
-        };
-
-        checkAndSeedDatabase();
-    }, [showToast]);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
-        // Real-time listener
         const q = query(collection(db, "parts"), orderBy("name"));
         return onSnapshot(q, (snap) => setParts(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
     }, []);
@@ -141,22 +76,76 @@ const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success
         if(!newPart.name) return;
         try {
             await addDoc(collection(db, "parts"), { ...newPart, timestamp: serverTimestamp() });
-            showToast("Part added to inventory", 'success');
+            showToast("Part added successfully", 'success');
             setNewPart({ name: '', partNumber: '', quantity: 0, bin: '', type: 'Universal' });
         } catch(err) { showToast("Failed to add part", 'error'); }
     };
 
     const updateQty = async (id: string, delta: number) => {
-        try {
-            const partRef = doc(db, "parts", id);
-            await updateDoc(partRef, { quantity: increment(delta) });
-        } catch(err) { console.error(err); }
+        try { await updateDoc(doc(db, "parts", id), { quantity: increment(delta) }); } catch(err) { console.error(err); }
     };
 
     const deletePart = async (id: string) => {
-        if(!confirm("Remove this part from inventory list?")) return;
+        if(!confirm("Delete this item?")) return;
         await deleteDoc(doc(db, "parts", id));
-        showToast("Part removed", 'success');
+    };
+
+    // --- CLEAR DATABASE FUNCTION ---
+    const clearDatabase = async () => {
+        if(!confirm("⚠️ DANGER: This will delete ALL parts from the inventory.\n\nOnly do this if you want to wipe the data and upload a fresh CSV.")) return;
+        
+        try {
+            const snap = await getDocs(collection(db, "parts"));
+            const batch = writeBatch(db);
+            snap.docs.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+            showToast("Database Cleared.", 'success');
+        } catch(err) {
+            showToast("Failed to clear database.", 'error');
+        }
+    };
+
+    // --- CSV IMPORT FUNCTION ---
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            const text = event.target?.result as string;
+            const rows = text.split('\n').slice(1); // Skip header row
+            
+            const batch = writeBatch(db);
+            let count = 0;
+
+            rows.forEach(row => {
+                const cols = row.split(',');
+                if (cols.length >= 2) { // Ensure row has data
+                    // CSV Format expected: Name, Part#, Bin, Qty, Type
+                    const partData = {
+                        name: cols[0]?.trim() || "Unknown Part",
+                        partNumber: cols[1]?.trim() || "N/A",
+                        bin: cols[2]?.trim() || "—",
+                        quantity: parseInt(cols[3]?.trim()) || 0,
+                        type: cols[4]?.trim() || "Universal",
+                        timestamp: serverTimestamp()
+                    };
+                    const docRef = doc(collection(db, "parts"));
+                    batch.set(docRef, partData);
+                    count++;
+                }
+            });
+
+            if (count > 0) {
+                await batch.commit();
+                showToast(`Successfully imported ${count} parts!`, 'success');
+            } else {
+                showToast("No valid data found in CSV.", 'error');
+            }
+        };
+        reader.readAsText(file);
+        // Reset input value to allow re-uploading same file if needed
+        if (fileInputRef.current) fileInputRef.current.value = "";
     };
 
     const filteredParts = parts.filter(p => 
@@ -166,6 +155,19 @@ const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success
 
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* CSV UPLOAD & CLEAR CONTROLS */}
+            <div className="flex justify-end gap-3 mb-4">
+                <input type="file" accept=".csv" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
+                
+                <button onClick={() => clearDatabase()} className="text-xs font-bold text-red-400 hover:text-red-600 underline">
+                    🗑️ Clear Database
+                </button>
+                <div className="w-[1px] h-4 bg-slate-300"></div>
+                <button onClick={() => fileInputRef.current?.click()} className="text-xs font-bold text-[#002d72] hover:text-[#ef7c00] underline">
+                    📂 Import CSV
+                </button>
+            </div>
+
             <div className="bg-white p-8 rounded-2xl shadow-xl border-t-8 border-[#002d72] mb-8">
                 <h2 className="text-2xl font-black text-[#002d72] italic uppercase mb-6">Add New Part</h2>
                 <form onSubmit={handleAddPart} className="flex gap-4 items-end">
