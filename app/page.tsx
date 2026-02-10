@@ -1,7 +1,8 @@
 "use client";
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db, auth } from './firebaseConfig'; 
-import { collection, onSnapshot, query, orderBy, doc, serverTimestamp, setDoc, addDoc, deleteDoc, getDoc, limit, writeBatch } from "firebase/firestore";
+// FIX: Added 'getDocs' back to this list so Analytics & Handover work
+import { collection, onSnapshot, query, orderBy, doc, serverTimestamp, setDoc, addDoc, deleteDoc, getDoc, getDocs, limit, writeBatch } from "firebase/firestore";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
@@ -72,15 +73,18 @@ const calculateDaysOOS = (start: string) => {
     return Math.max(0, Math.ceil((now.getTime() - s.getTime()) / (1000 * 3600 * 24)));
 };
 
-// --- COMPONENT: HIGH-PERFORMANCE PARTS LIST ---
+// --- COMPONENT: HIGH-PERFORMANCE PARTS LIST (V5) ---
 const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success'|'error') => void }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [displayLimit, setDisplayLimit] = useState(100);
     const [sortConfig, setSortConfig] = useState<{ key: 'partNumber' | 'name', direction: 'asc' | 'desc' }>({ key: 'name', direction: 'asc' });
     const [isLargeText, setIsLargeText] = useState(false);
 
+    // 1. Filter 12k items instantly
     const filteredParts = useMemo(() => {
         let results = localParts;
+        
+        // Search Filter
         if (searchTerm) {
             const lowerSearch = searchTerm.toLowerCase();
             results = localParts.filter((p: any) => 
@@ -88,6 +92,8 @@ const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success
                 (p.name && String(p.name).toLowerCase().includes(lowerSearch))
             );
         }
+
+        // Sort Filter
         return [...results].sort((a: any, b: any) => {
             const valA = String(a[sortConfig.key] || '').toLowerCase();
             const valB = String(b[sortConfig.key] || '').toLowerCase();
@@ -95,8 +101,10 @@ const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success
             if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
             return 0;
         });
+
     }, [searchTerm, sortConfig]);
 
+    // 2. Only render the first X items to keep scrolling smooth
     const visibleParts = filteredParts.slice(0, displayLimit);
 
     const handleCopy = (text: string) => {
@@ -118,7 +126,10 @@ const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success
                     <h2 className="text-3xl font-black text-[#002d72] italic uppercase tracking-tighter leading-none">Parts Registry</h2>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Local Reference (Search {localParts.length.toLocaleString()} Items)</p>
                 </div>
+                
+                {/* SEARCH & TEXT SIZE CONTROLS */}
                 <div className="flex items-center gap-3 w-full max-w-lg">
+                    {/* TEXT SIZE TOGGLE BUTTON */}
                     <button 
                         onClick={() => setIsLargeText(!isLargeText)}
                         className={`h-12 w-12 flex items-center justify-center rounded-2xl border-2 font-black transition-all ${isLargeText ? 'bg-[#002d72] border-[#002d72] text-white' : 'bg-white border-slate-200 text-slate-400 hover:border-[#002d72] hover:text-[#002d72]'}`}
@@ -126,6 +137,7 @@ const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success
                     >
                         Aa
                     </button>
+
                     <div className="relative flex-grow">
                         <input type="text" placeholder="Search Part # or Description..." className="w-full p-4 pl-12 bg-white border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-[#002d72] transition-all shadow-sm" value={searchTerm} onChange={e => { setSearchTerm(e.target.value); setDisplayLimit(100); }} />
                         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl">🔍</span>
@@ -134,6 +146,7 @@ const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success
             </div>
 
             <div className="bg-white rounded-3xl shadow-xl border border-slate-100 flex-grow overflow-hidden flex flex-col relative">
+                {/* SORTABLE HEADER */}
                 <div className="bg-[#002d72] grid grid-cols-12 gap-4 p-5 text-[10px] font-black uppercase text-white tracking-widest select-none">
                     <div className="col-span-3 cursor-pointer hover:text-[#ef7c00] flex items-center gap-1" onClick={() => handleSort('partNumber')}>
                         Part Number {sortConfig.key === 'partNumber' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
@@ -144,11 +157,13 @@ const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success
                     <div className="col-span-1 text-center">View</div>
                 </div>
 
+                {/* SCROLLABLE LIST */}
                 <div className="overflow-y-auto flex-grow bg-slate-50/30 custom-scrollbar">
                     {visibleParts.length === 0 ? <div className="p-20 text-center text-slate-300 italic font-bold">No results found.</div> : (
                         <div className="divide-y divide-slate-100">
                             {visibleParts.map((p: any, i: number) => (
                                 <div key={i} className="grid grid-cols-12 gap-4 p-4 hover:bg-white transition-all group items-center">
+                                    {/* CLICK TO COPY PART NUMBER */}
                                     <div 
                                         onClick={() => handleCopy(p.partNumber)}
                                         className={`col-span-3 font-mono font-black text-[#002d72] bg-blue-50 w-fit rounded-lg cursor-pointer hover:bg-[#ef7c00] hover:text-white transition-all active:scale-95 shadow-sm ${isLargeText ? 'text-xl px-4 py-2' : 'text-sm px-3 py-1'}`}
@@ -156,9 +171,13 @@ const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success
                                     >
                                         {p.partNumber}
                                     </div>
+                                    
+                                    {/* DESCRIPTION (Dynamic Text Size) */}
                                     <div className={`col-span-8 font-bold text-slate-600 uppercase flex items-center ${isLargeText ? 'text-lg leading-normal' : 'text-[11px] leading-tight'}`}>
                                         {p.name}
                                     </div>
+                                    
+                                    {/* DIRECT GOOGLE IMAGES LINK */}
                                     <div className="col-span-1 flex justify-center">
                                         <a 
                                             href={`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(p.name + " " + p.partNumber + " bus part")}`}
@@ -222,7 +241,7 @@ const StatusCharts = ({ buses }: { buses: any[] }) => {
     );
 };
 
-// --- COMPONENT: ANALYTICS DASHBOARD (RESTORED) ---
+// --- COMPONENT: ANALYTICS DASHBOARD ---
 const AnalyticsDashboard = ({ buses, showToast }: { buses: any[], showToast: (msg: string, type: 'success'|'error') => void }) => {
     const [shopQueens, setShopQueens] = useState<{number: string, count: number}[]>([]);
     const [isResetting, setIsResetting] = useState(false);
