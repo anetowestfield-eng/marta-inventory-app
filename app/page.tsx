@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect } from 'react';
 import { db, auth } from './firebaseConfig'; 
-import { collection, onSnapshot, query, orderBy, doc, serverTimestamp, setDoc, writeBatch, getDocs, getDoc, addDoc, deleteDoc, limit } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc, serverTimestamp, setDoc, writeBatch, getDocs, getDoc, addDoc, deleteDoc, limit, updateDoc, increment } from "firebase/firestore";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
@@ -59,7 +59,108 @@ const logHistory = async (busNumber: string, action: string, details: string, us
     }
 };
 
-// --- COMPONENT: VISUAL CHARTS (Analytics) ---
+// --- COMPONENT: PARTS INVENTORY ---
+const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success'|'error') => void }) => {
+    const [parts, setParts] = useState<any[]>([]);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [newPart, setNewPart] = useState({ name: '', partNumber: '', quantity: 0, bin: '', type: 'Universal' });
+
+    useEffect(() => {
+        // Real-time parts listener
+        const q = query(collection(db, "parts"), orderBy("name"));
+        return onSnapshot(q, (snap) => setParts(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
+    }, []);
+
+    const handleAddPart = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if(!newPart.name) return;
+        try {
+            await addDoc(collection(db, "parts"), { ...newPart, timestamp: serverTimestamp() });
+            showToast("Part added to inventory", 'success');
+            setNewPart({ name: '', partNumber: '', quantity: 0, bin: '', type: 'Universal' });
+        } catch(err) { showToast("Failed to add part", 'error'); }
+    };
+
+    const updateQty = async (id: string, delta: number) => {
+        try {
+            const partRef = doc(db, "parts", id);
+            await updateDoc(partRef, { quantity: increment(delta) });
+        } catch(err) { console.error(err); }
+    };
+
+    const deletePart = async (id: string) => {
+        if(!confirm("Remove this part from inventory list?")) return;
+        await deleteDoc(doc(db, "parts", id));
+        showToast("Part removed", 'success');
+    };
+
+    const filteredParts = parts.filter(p => 
+        p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        p.partNumber.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    return (
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="bg-white p-8 rounded-2xl shadow-xl border-t-8 border-[#002d72] mb-8">
+                <h2 className="text-2xl font-black text-[#002d72] italic uppercase mb-6">Add New Part</h2>
+                <form onSubmit={handleAddPart} className="flex gap-4 items-end">
+                    <div className="flex-grow"><label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Part Name</label><input className="w-full p-3 bg-slate-50 border rounded-lg font-bold outline-none focus:border-[#002d72]" placeholder="e.g. Brake Caliper" value={newPart.name} onChange={e=>setNewPart({...newPart, name: e.target.value})} required /></div>
+                    <div className="w-40"><label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Part #</label><input className="w-full p-3 bg-slate-50 border rounded-lg font-bold outline-none focus:border-[#002d72]" placeholder="X-9902" value={newPart.partNumber} onChange={e=>setNewPart({...newPart, partNumber: e.target.value})} /></div>
+                    <div className="w-24"><label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Qty</label><input type="number" className="w-full p-3 bg-slate-50 border rounded-lg font-bold outline-none focus:border-[#002d72]" value={newPart.quantity} onChange={e=>setNewPart({...newPart, quantity: parseInt(e.target.value)})} /></div>
+                    <div className="w-32"><label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Bin Loc</label><input className="w-full p-3 bg-slate-50 border rounded-lg font-bold outline-none focus:border-[#002d72]" placeholder="A-12" value={newPart.bin} onChange={e=>setNewPart({...newPart, bin: e.target.value})} /></div>
+                    <div className="w-40"><label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Type</label><select className="w-full p-3 bg-slate-50 border rounded-lg font-bold outline-none" value={newPart.type} onChange={e=>setNewPart({...newPart, type: e.target.value})}><option>Universal</option><option>Gillig</option><option>New Flyer</option><option>Engine</option></select></div>
+                    <button className="px-6 py-3 bg-[#002d72] text-white font-black rounded-lg uppercase tracking-widest hover:bg-[#ef7c00] transition-colors shadow-lg">Add</button>
+                </form>
+            </div>
+
+            <div className="flex justify-between items-center mb-6">
+                <input type="text" placeholder="Search Inventory..." className="w-full max-w-md p-3 bg-white border border-slate-200 rounded-lg font-bold outline-none focus:border-[#002d72]" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                <div className="flex gap-2">
+                    <div className="px-4 py-2 bg-slate-100 rounded-lg"><span className="text-xs font-bold text-slate-500">Total Items: <span className="text-slate-900">{parts.length}</span></span></div>
+                </div>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <table className="w-full text-left">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                        <tr>
+                            <th className="p-4 text-[9px] font-black uppercase text-slate-400 tracking-widest">Part Name</th>
+                            <th className="p-4 text-[9px] font-black uppercase text-slate-400 tracking-widest">Number</th>
+                            <th className="p-4 text-[9px] font-black uppercase text-slate-400 tracking-widest">Bin</th>
+                            <th className="p-4 text-[9px] font-black uppercase text-slate-400 tracking-widest">Type</th>
+                            <th className="p-4 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">Stock Level</th>
+                            <th className="p-4 text-[9px] font-black uppercase text-slate-400 tracking-widest text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {filteredParts.length === 0 ? (
+                            <tr><td colSpan={6} className="p-12 text-center text-slate-400 italic">Inventory list is empty.</td></tr>
+                        ) : filteredParts.map(part => (
+                            <tr key={part.id} className={`hover:bg-slate-50 transition-colors group ${part.quantity === 0 ? 'bg-red-50/50' : ''}`}>
+                                <td className="p-4 font-bold text-slate-700">{part.name}</td>
+                                <td className="p-4 text-xs font-mono text-slate-500">{part.partNumber || '--'}</td>
+                                <td className="p-4 text-xs font-bold text-[#002d72]">{part.bin || 'Unknown'}</td>
+                                <td className="p-4"><span className="px-2 py-1 bg-slate-100 rounded text-[9px] font-black uppercase text-slate-500">{part.type}</span></td>
+                                <td className="p-4 text-center">
+                                    <div className="flex items-center justify-center gap-3">
+                                        <button onClick={() => updateQty(part.id, -1)} className="w-6 h-6 flex items-center justify-center rounded bg-slate-200 hover:bg-red-200 text-slate-600 hover:text-red-600 font-bold transition-colors">-</button>
+                                        <span className={`w-8 text-center font-black ${part.quantity < 3 ? 'text-red-500' : 'text-slate-800'}`}>{part.quantity}</span>
+                                        <button onClick={() => updateQty(part.id, 1)} className="w-6 h-6 flex items-center justify-center rounded bg-slate-200 hover:bg-green-200 text-slate-600 hover:text-green-600 font-bold transition-colors">+</button>
+                                    </div>
+                                </td>
+                                <td className="p-4 text-right">
+                                    <button onClick={() => deletePart(part.id)} className="text-slate-300 hover:text-red-500 transition-colors">🗑️</button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
+// --- COMPONENT: STATUS CHARTS (Analytics) ---
 const StatusCharts = ({ buses }: { buses: any[] }) => {
     const statusCounts: {[key: string]: number} = {
         'Active': 0, 'In Shop': 0, 'Engine': 0, 'Body Shop': 0, 'Vendor': 0, 'Brakes': 0, 'Safety': 0
@@ -463,7 +564,7 @@ const BusInputForm = ({ showToast }: { showToast: (msg: string, type: 'success'|
 // --- MAIN APPLICATION ---
 export default function MartaInventory() {
   const [user, setUser] = useState<any>(null);
-  const [view, setView] = useState<'inventory' | 'tracker' | 'input' | 'analytics' | 'handover'>('inventory');
+  const [view, setView] = useState<'inventory' | 'tracker' | 'input' | 'analytics' | 'handover' | 'parts'>('inventory');
   const [inventoryMode, setInventoryMode] = useState<'list' | 'grid'>('grid');
   const [buses, setBuses] = useState<any[]>([]);
   const [selectedBusDetail, setSelectedBusDetail] = useState<any>(null);
@@ -618,8 +719,8 @@ export default function MartaInventory() {
             <span className="font-black text-lg italic uppercase tracking-tighter text-[#002d72]">Fleet Manager</span>
         </div>
         <div className="flex gap-4 items-center">
-          {['inventory', 'input', 'tracker', 'analytics', 'handover'].map(v => (
-            <button key={v} onClick={() => setView(v as any)} className={`text-[9px] font-black uppercase tracking-widest border-b-2 pb-1 transition-all ${view === v ? 'border-[#ef7c00] text-[#002d72]' : 'border-transparent text-slate-400 hover:text-[#002d72]'}`}>{v.replace('input', 'Data Entry').replace('handover', 'Handover').replace('analytics', 'Analytics')}</button>
+          {['inventory', 'input', 'tracker', 'analytics', 'handover', 'parts'].map(v => (
+            <button key={v} onClick={() => setView(v as any)} className={`text-[9px] font-black uppercase tracking-widest border-b-2 pb-1 transition-all ${view === v ? 'border-[#ef7c00] text-[#002d72]' : 'border-transparent text-slate-400 hover:text-[#002d72]'}`}>{v.replace('input', 'Data Entry').replace('handover', 'Handover').replace('analytics', 'Analytics').replace('parts', 'Parts List')}</button>
           ))}
           <div className="h-4 w-[1px] bg-slate-200"></div>
           <button onClick={exportToExcel} className="text-[#002d72] hover:text-[#ef7c00] text-[10px] font-black uppercase transition-all tracking-widest">Export Excel</button>
@@ -636,6 +737,8 @@ export default function MartaInventory() {
           <AnalyticsDashboard buses={buses} showToast={triggerToast} />
         ) : view === 'handover' ? (
           <ShiftHandover buses={buses} showToast={triggerToast} />
+        ) : view === 'parts' ? (
+          <PartsInventory showToast={triggerToast} />
         ) : (
           <>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
