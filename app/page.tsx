@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db, auth } from './firebaseConfig'; 
-// FIX: Added 'getDocs' back to this list so Analytics & Handover work
+// FIX: Added 'getDocs' (plural) to this list. It was missing before.
 import { collection, onSnapshot, query, orderBy, doc, serverTimestamp, setDoc, addDoc, deleteDoc, getDoc, getDocs, limit, writeBatch } from "firebase/firestore";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import ExcelJS from 'exceljs';
@@ -73,7 +73,7 @@ const calculateDaysOOS = (start: string) => {
     return Math.max(0, Math.ceil((now.getTime() - s.getTime()) / (1000 * 3600 * 24)));
 };
 
-// --- COMPONENT: HIGH-PERFORMANCE PARTS LIST (V5) ---
+// --- COMPONENT: HIGH-PERFORMANCE PARTS LIST ---
 const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success'|'error') => void }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [displayLimit, setDisplayLimit] = useState(100);
