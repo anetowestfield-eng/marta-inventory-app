@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db, auth } from './firebaseConfig'; 
-import { collection, onSnapshot, query, orderBy, doc, serverTimestamp, setDoc, addDoc, deleteDoc, getDoc, limit } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc, serverTimestamp, setDoc, addDoc, deleteDoc, getDoc, limit, writeBatch } from "firebase/firestore";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
@@ -72,17 +72,15 @@ const calculateDaysOOS = (start: string) => {
     return Math.max(0, Math.ceil((now.getTime() - s.getTime()) / (1000 * 3600 * 24)));
 };
 
-// --- COMPONENT: HIGH-PERFORMANCE PARTS LIST (V4 - Direct Link) ---
+// --- COMPONENT: HIGH-PERFORMANCE PARTS LIST ---
 const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success'|'error') => void }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [displayLimit, setDisplayLimit] = useState(100);
     const [sortConfig, setSortConfig] = useState<{ key: 'partNumber' | 'name', direction: 'asc' | 'desc' }>({ key: 'name', direction: 'asc' });
+    const [isLargeText, setIsLargeText] = useState(false);
 
-    // 1. Filter 12k items instantly
     const filteredParts = useMemo(() => {
         let results = localParts;
-        
-        // Search Filter
         if (searchTerm) {
             const lowerSearch = searchTerm.toLowerCase();
             results = localParts.filter((p: any) => 
@@ -90,8 +88,6 @@ const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success
                 (p.name && String(p.name).toLowerCase().includes(lowerSearch))
             );
         }
-
-        // Sort Filter
         return [...results].sort((a: any, b: any) => {
             const valA = String(a[sortConfig.key] || '').toLowerCase();
             const valB = String(b[sortConfig.key] || '').toLowerCase();
@@ -99,10 +95,8 @@ const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success
             if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
             return 0;
         });
-
     }, [searchTerm, sortConfig]);
 
-    // 2. Only render the first X items to keep scrolling smooth
     const visibleParts = filteredParts.slice(0, displayLimit);
 
     const handleCopy = (text: string) => {
@@ -124,14 +118,22 @@ const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success
                     <h2 className="text-3xl font-black text-[#002d72] italic uppercase tracking-tighter leading-none">Parts Registry</h2>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Local Reference (Search {localParts.length.toLocaleString()} Items)</p>
                 </div>
-                <div className="w-full max-w-md relative">
-                    <input type="text" placeholder="Search Part # or Description..." className="w-full p-4 pl-12 bg-white border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-[#002d72] transition-all shadow-sm" value={searchTerm} onChange={e => { setSearchTerm(e.target.value); setDisplayLimit(100); }} />
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl">🔍</span>
+                <div className="flex items-center gap-3 w-full max-w-lg">
+                    <button 
+                        onClick={() => setIsLargeText(!isLargeText)}
+                        className={`h-12 w-12 flex items-center justify-center rounded-2xl border-2 font-black transition-all ${isLargeText ? 'bg-[#002d72] border-[#002d72] text-white' : 'bg-white border-slate-200 text-slate-400 hover:border-[#002d72] hover:text-[#002d72]'}`}
+                        title="Toggle Text Size"
+                    >
+                        Aa
+                    </button>
+                    <div className="relative flex-grow">
+                        <input type="text" placeholder="Search Part # or Description..." className="w-full p-4 pl-12 bg-white border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-[#002d72] transition-all shadow-sm" value={searchTerm} onChange={e => { setSearchTerm(e.target.value); setDisplayLimit(100); }} />
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl">🔍</span>
+                    </div>
                 </div>
             </div>
 
             <div className="bg-white rounded-3xl shadow-xl border border-slate-100 flex-grow overflow-hidden flex flex-col relative">
-                {/* SORTABLE HEADER */}
                 <div className="bg-[#002d72] grid grid-cols-12 gap-4 p-5 text-[10px] font-black uppercase text-white tracking-widest select-none">
                     <div className="col-span-3 cursor-pointer hover:text-[#ef7c00] flex items-center gap-1" onClick={() => handleSort('partNumber')}>
                         Part Number {sortConfig.key === 'partNumber' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
@@ -142,29 +144,27 @@ const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success
                     <div className="col-span-1 text-center">View</div>
                 </div>
 
-                {/* SCROLLABLE LIST */}
                 <div className="overflow-y-auto flex-grow bg-slate-50/30 custom-scrollbar">
                     {visibleParts.length === 0 ? <div className="p-20 text-center text-slate-300 italic font-bold">No results found.</div> : (
                         <div className="divide-y divide-slate-100">
                             {visibleParts.map((p: any, i: number) => (
                                 <div key={i} className="grid grid-cols-12 gap-4 p-4 hover:bg-white transition-all group items-center">
-                                    {/* CLICK TO COPY PART NUMBER */}
                                     <div 
                                         onClick={() => handleCopy(p.partNumber)}
-                                        className="col-span-3 font-mono font-black text-[#002d72] bg-blue-50 w-fit px-3 py-1 rounded-lg cursor-pointer hover:bg-[#ef7c00] hover:text-white transition-all active:scale-95 shadow-sm"
+                                        className={`col-span-3 font-mono font-black text-[#002d72] bg-blue-50 w-fit rounded-lg cursor-pointer hover:bg-[#ef7c00] hover:text-white transition-all active:scale-95 shadow-sm ${isLargeText ? 'text-xl px-4 py-2' : 'text-sm px-3 py-1'}`}
                                         title="Click to Copy"
                                     >
                                         {p.partNumber}
                                     </div>
-                                    <div className="col-span-8 font-bold text-slate-600 uppercase text-[11px] flex items-center leading-tight">{p.name}</div>
-                                    
-                                    {/* DIRECT GOOGLE IMAGES LINK */}
+                                    <div className={`col-span-8 font-bold text-slate-600 uppercase flex items-center ${isLargeText ? 'text-lg leading-normal' : 'text-[11px] leading-tight'}`}>
+                                        {p.name}
+                                    </div>
                                     <div className="col-span-1 flex justify-center">
                                         <a 
                                             href={`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(p.name + " " + p.partNumber + " bus part")}`}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="text-lg opacity-50 hover:opacity-100 hover:scale-125 transition-all text-[#002d72] no-underline"
+                                            className={`opacity-50 hover:opacity-100 hover:scale-125 transition-all text-[#002d72] no-underline ${isLargeText ? 'text-2xl' : 'text-lg'}`}
                                             title="Search on Google Images"
                                         >
                                             👁️
@@ -214,6 +214,77 @@ const StatusCharts = ({ buses }: { buses: any[] }) => {
                             <div className="absolute -top-6 text-[10px] font-bold text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity">{d.count}</div>
                             <div className="w-full bg-blue-100 hover:bg-[#002d72] rounded-t-sm transition-all" style={{ height: `${(d.count/Math.max(...trendData.map(t=>t.count),1))*100 || 2}%` }}></div>
                             <p className="text-[8px] font-bold text-slate-300 mt-2">{d.label}</p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- COMPONENT: ANALYTICS DASHBOARD (RESTORED) ---
+const AnalyticsDashboard = ({ buses, showToast }: { buses: any[], showToast: (msg: string, type: 'success'|'error') => void }) => {
+    const [shopQueens, setShopQueens] = useState<{number: string, count: number}[]>([]);
+    const [isResetting, setIsResetting] = useState(false);
+    
+    useEffect(() => {
+        const fetchRankings = async () => {
+            const rankings: {number: string, count: number}[] = [];
+            const sampleBuses = buses.slice(0, 50); 
+            for (const bus of sampleBuses) {
+                const hSnap = await getDocs(query(collection(db, "buses", bus.number, "history"), limit(20)));
+                if (hSnap.size > 0) rankings.push({ number: bus.number, count: hSnap.size });
+            }
+            setShopQueens(rankings.sort((a,b) => b.count - a.count).slice(0, 5));
+        };
+        if(buses.length > 0) fetchRankings();
+    }, [buses]);
+
+    const handleResetMetrics = async () => {
+        if(!confirm("⚠️ WARNING: This will WIPE ALL HISTORY logs for the entire fleet.\n\n• 'Shop Buses' counts will reset to 0.\n• '7-Day Trend' will flatten.\n• Shift Handover reports will be cleared.\n\nAre you sure you want to delete all historical data?")) return;
+        setIsResetting(true);
+        try {
+            let deletedCount = 0;
+            for (const bus of buses) {
+                const hSnap = await getDocs(collection(db, "buses", bus.number, "history"));
+                if (!hSnap.empty) {
+                    const batch = writeBatch(db);
+                    hSnap.docs.forEach(doc => batch.delete(doc.ref));
+                    await batch.commit();
+                    deletedCount += hSnap.size;
+                }
+            }
+            showToast(`Analytics Reset Complete. Cleared ${deletedCount} records.`, 'success');
+            setShopQueens([]); 
+        } catch (err) {
+            console.error("Reset failed", err);
+            showToast("Failed to reset records.", 'error');
+        }
+        setIsResetting(false);
+    };
+
+    const avgOOS = buses.reduce((acc, b) => acc + (b.status !== 'Active' ? 1 : 0), 0);
+
+    return (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Fleet Availability</p>
+                <p className="text-4xl font-black text-[#002d72] italic">{Math.round(((buses.length - avgOOS) / Math.max(buses.length, 1)) * 100)}%</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Down Units</p>
+                <p className="text-4xl font-black text-red-500 italic">{avgOOS}</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                <div className="flex justify-between items-center mb-2">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Analytics Admin</p>
+                    <button onClick={handleResetMetrics} disabled={isResetting} className="text-[9px] font-black text-red-400 hover:text-red-600 uppercase border border-red-100 rounded px-2 py-1 bg-red-50 disabled:opacity-50">{isResetting ? "..." : "Reset All Logs"}</button>
+                </div>
+                <div className="space-y-2">
+                    {shopQueens.map((queen, i) => (
+                        <div key={i} className="flex justify-between items-center text-xs border-b border-slate-50 pb-1">
+                            <span className="font-bold text-slate-700">#{queen.number}</span>
+                            <span className="font-mono text-red-500">{queen.count} logs</span>
                         </div>
                     ))}
                 </div>
@@ -298,7 +369,7 @@ const BusDetailView = ({ bus, onClose, showToast }: { bus: any; onClose: () => v
     };
 
     if (showHistory) return (
-        <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-lg h-[600px] flex flex-col">
+        <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-lg h-[600px] flex flex-col animate-in zoom-in-95">
             <div className="flex justify-between items-center mb-4 border-b pb-4 font-black text-[#002d72] uppercase"><span>History: #{bus.number}</span><button onClick={()=>setShowHistory(false)} className="text-xs text-slate-400">Back</button></div>
             <div className="flex-grow overflow-y-auto space-y-3">
                 {historyLogs.map(l => (
