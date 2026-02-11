@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db, auth } from './firebaseConfig'; 
-import { collection, onSnapshot, query, orderBy, doc, serverTimestamp, setDoc, addDoc, deleteDoc, getDoc, getDocs, limit, writeBatch, updateDoc, arrayUnion } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc, serverTimestamp, setDoc, addDoc, deleteDoc, getDoc, getDocs, limit, writeBatch, updateDoc, arrayUnion, increment } from "firebase/firestore";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
@@ -86,12 +86,61 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
     // Incident Form
     const [incData, setIncData] = useState({ type: 'Sick', date: '', count: 1, docReceived: false, notes: '' });
 
+    // --- BULK STAFF LIST ---
+    const staffList = [
+        "Sean Foxx", "Aneto Westfield", "Timothy Johnson", "Kenneth Smith", "Adriel Reece", "Morris Lewis", 
+        "Xavier Summers", "Toni Murray", "Charles Brown", "Ronald White", "Dequan Wilson", "David Hutcheson", 
+        "Pedro Chenault", "Lech Slomiany", "Willie Smith", "Keith Evans", "Robert Pritchett", "Bryan Parks", 
+        "Haley Hernandez", "Emmett Ingram", "Carey Cooper", "Calvin Smith", "Maurice Cousar", "Yalik Roulhac", 
+        "Lawrence McCrary", "Pharyle Boddie", "Clarence Patterson", "David Dominguez", "Edward Gist", 
+        "Theophilus Stegall", "Darell Denny", "Brian Coldmon", "Kenneth Payne", "Ja'Corey Owensby", 
+        "Stevie Manuel", "Llave Gomez", "Joshua Hammond", "Antonio Poole", "William McKinney", "Stephen Daniel", 
+        "Jalil Gloster", "David Jackson", "Timothy Barnes", "Darrin Clinton", "Joaquin Dominguez", "David Swanson", 
+        "Brian Jackson", "Terry Ringstaff", "Calvin Tucker", "Roderick Thomas", "Timothy Patrick", "Brandon Thomas", 
+        "Oumeshwar Pooran", "Peter Cook", "Lamar Carter", "Juan Ortiz", "Donald McMullen", "Cordarius Cousins", 
+        "Jonathan Foster", "Kenneth Cothran", "Kevin Sailsman", "Jeffrey Campbell", "Ronnie Payne", "Sabrina Glass-Ford", 
+        "Rico Hill", "Mpoyi Kim", "Evenmore Bota", "Edward Bryan", "Felix Rice", "Bryant Calliste", "Andrew Lewis", 
+        "Edward Singleton", "Terry Lee", "Zonka Lamar", "George Austin", "Jason Collins", "Aime Akoussan", 
+        "Patrick Kitchens", "Matthew Perry", "Derrick Taylor", "Xamari McGhee", "Julian Freckleton", 
+        "Christopher Baskerville", "Yeudiel Ortiz Vargas", "Booz Dominguez", "Kenneth Marte", "Thomas Fordyce", 
+        "Orlando Ortiz Vargas", "Brian Morton", "Felicia Walker", "Debraca Tenny", "Peter Hosking", "Kaneshia Fowler", 
+        "Patricia Brown", "Darrell Owens", "Michael Braxton", "Larry Babb", "Felecia Harber", "Latoya Green", 
+        "Kerry Mitchell", "Ekoue Akpah", "Otis Brinson", "Shelby Roussaw", "Jason Pope", "Lillie Green", 
+        "Beverly Foster", "Tammi Peavy", "Immacula Point-Du-Jour", "Letosha Rowden", "Alethia Woods", 
+        "Linwood Harrell", "Michelle Gibson", "Dafford Madison", "Alancondro Henderson", "Luis Munoz", 
+        "Derek Collier", "Phillip Lee", "Mark Scott"
+    ];
+
+    const handleBulkImport = async () => {
+        if(!confirm(`This will add ${staffList.length} employees to the database. Continue?`)) return;
+        
+        const uniqueNames = [...new Set(staffList)];
+        const batch = writeBatch(db);
+
+        uniqueNames.forEach(name => {
+            const newRef = doc(collection(db, "personnel"));
+            batch.set(newRef, {
+                name: name,
+                totalOccurrences: 0,
+                incidents: [],
+                timestamp: serverTimestamp()
+            });
+        });
+
+        try {
+            await batch.commit();
+            showToast(`Successfully added ${uniqueNames.length} employees!`, 'success');
+        } catch (err) {
+            console.error(err);
+            showToast("Import failed. Check console.", 'error');
+        }
+    };
+
     useEffect(() => {
         const q = query(collection(db, "personnel"), orderBy("name"));
         return onSnapshot(q, (snap) => setPersonnel(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
     }, []);
 
-    // Helper: Flatten all incidents for the "Log" view
     const allIncidents = useMemo(() => {
         let logs: any[] = [];
         personnel.forEach(p => {
@@ -101,11 +150,9 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                 });
             }
         });
-        // Sort by date descending
         return logs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     }, [personnel]);
 
-    // Helper: Calculate Dashboard Stats
     const stats = useMemo(() => {
         const typeCounts: {[key: string]: number} = {};
         let totalOccurrences = 0;
@@ -116,7 +163,7 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
             typeCounts[inc.type] = (typeCounts[inc.type] || 0) + c;
         });
 
-        const topOffenders = [...personnel].sort((a,b) => (b.totalOccurrences || 0) - (a.totalOccurrences || 0)).slice(0, 5);
+        const topOffenders = [...personnel].sort((a,b) => (b.totalOccurrences || 0) - (a.totalOccurrences || 0)).slice(0, 10);
 
         return { totalOccurrences, typeCounts, topOffenders };
     }, [allIncidents, personnel]);
@@ -171,6 +218,9 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                         <button onClick={()=>setViewMode('dashboard')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded transition-all ${viewMode==='dashboard'?'bg-[#002d72] text-white shadow':'text-slate-400 hover:text-[#002d72]'}`}>Dashboard</button>
                         <button onClick={()=>setViewMode('log')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded transition-all ${viewMode==='log'?'bg-[#002d72] text-white shadow':'text-slate-400 hover:text-[#002d72]'}`}>Master Log</button>
                     </div>
+                    {/* BULK UPLOAD BUTTON */}
+                    <button onClick={handleBulkImport} className="px-4 py-2 bg-purple-600 text-white rounded-lg font-black uppercase text-[10px] shadow-lg hover:bg-purple-700 transition-all">⚠️ Import Staff List</button>
+                    
                     <button onClick={() => setShowIncidentModal(true)} className="px-6 py-2 bg-[#ef7c00] text-white rounded-lg font-black uppercase text-[10px] shadow-lg hover:bg-orange-600 transition-all">+ Log Incident</button>
                     <button onClick={() => setShowAddModal(true)} className="px-4 py-2 bg-slate-200 text-slate-600 rounded-lg font-black uppercase text-[10px] hover:bg-slate-300 transition-all">+ Emp</button>
                 </div>
@@ -179,7 +229,6 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
             {/* DASHBOARD VIEW */}
             {viewMode === 'dashboard' && (
                 <div className="space-y-6 overflow-y-auto pb-10">
-                    {/* TOP STATS */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Occurrences</p>
@@ -200,7 +249,6 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* BREAKDOWN TABLE */}
                         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
                             <div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Incidents by Type</h3></div>
                             <table className="w-full text-left text-xs">
@@ -214,11 +262,10 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                             </table>
                         </div>
 
-                        {/* TOP OFFENDERS */}
                         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                            <div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Employees by Total Incidents</h3></div>
+                            <div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Top Offenders (By Occurrences)</h3></div>
                             <table className="w-full text-left text-xs">
-                                <thead className="text-slate-400 font-black uppercase bg-white border-b"><tr><th className="p-3">Employee Name</th><th className="p-3 text-right">Occurrences</th></tr></thead>
+                                <thead className="text-slate-400 font-black uppercase bg-white border-b"><tr><th className="p-3">Employee Name</th><th className="p-3 text-right">Count</th></tr></thead>
                                 <tbody className="divide-y divide-slate-50">
                                     {stats.topOffenders.map(emp => (
                                         <tr key={emp.id} className="hover:bg-red-50 transition-colors">
@@ -233,7 +280,7 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                 </div>
             )}
 
-            {/* LOG VIEW (ATTENDANCE SHEET STYLE) */}
+            {/* LOG VIEW */}
             {viewMode === 'log' && (
                 <div className="bg-white rounded-2xl shadow-lg border border-slate-200 flex-grow overflow-hidden flex flex-col">
                     <div className="bg-slate-50 border-b p-3 grid grid-cols-12 gap-2 text-[9px] font-black uppercase text-slate-400 tracking-widest">
@@ -259,7 +306,7 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                 </div>
             )}
 
-            {/* MODALS */}
+            {/* ADD STAFF MODAL */}
             {showAddModal && (
                 <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
                     <div className="bg-white p-6 rounded-2xl w-full max-w-sm">
@@ -270,6 +317,7 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                 </div>
             )}
 
+            {/* LOG INCIDENT MODAL */}
             {showIncidentModal && (
                 <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
                     <div className="bg-white p-8 rounded-2xl w-full max-w-md shadow-2xl">
