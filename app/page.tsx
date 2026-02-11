@@ -1,7 +1,6 @@
 "use client";
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db, auth } from './firebaseConfig'; 
-// FIX: Added 'getDocs' (plural) to this list. It was missing before.
 import { collection, onSnapshot, query, orderBy, doc, serverTimestamp, setDoc, addDoc, deleteDoc, getDoc, getDocs, limit, writeBatch } from "firebase/firestore";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import ExcelJS from 'exceljs';
@@ -73,7 +72,7 @@ const calculateDaysOOS = (start: string) => {
     return Math.max(0, Math.ceil((now.getTime() - s.getTime()) / (1000 * 3600 * 24)));
 };
 
-// --- COMPONENT: HIGH-PERFORMANCE PARTS LIST ---
+// --- COMPONENT: HIGH-PERFORMANCE PARTS LIST (V5) ---
 const PartsInventory = ({ showToast }: { showToast: (msg: string, type: 'success'|'error') => void }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [displayLimit, setDisplayLimit] = useState(100);
@@ -490,7 +489,7 @@ const BusInputForm = ({ showToast }: { showToast: (m:string, t:'success'|'error'
     );
 };
 
-export default function MartaInventory() {
+export default function FleetManager() {
   const [user, setUser] = useState<any>(null);
   const [view, setView] = useState<'inventory' | 'tracker' | 'input' | 'analytics' | 'handover' | 'parts'>('inventory');
   const [inventoryMode, setInventoryMode] = useState<'list' | 'grid'>('grid');
@@ -528,7 +527,7 @@ export default function MartaInventory() {
     const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('OOS Detail');
     ws.columns = [{header:'Bus #',key:'number',width:10},{header:'Status',key:'status',width:15},{header:'Location',key:'location',width:15},{header:'Fault',key:'notes',width:30},{header:'OOS Start',key:'start',width:15}];
     buses.forEach(b => ws.addRow({number:b.number, status:b.status, location:b.location||'', notes:b.notes||'', start:b.oosStartDate||''}));
-    const buf = await wb.xlsx.writeBuffer(); saveAs(new Blob([buf]), `MARTA_Fleet_Report.xlsx`);
+    const buf = await wb.xlsx.writeBuffer(); saveAs(new Blob([buf]), `Fleet_Status_Report.xlsx`);
     setToast({msg:"Excel Downloaded", type:'success'});
   };
 
@@ -539,10 +538,10 @@ export default function MartaInventory() {
   if (!user) return (
     <div className="min-h-screen flex items-center justify-center bg-[#001a3d] p-4 relative overflow-hidden">
       <form onSubmit={async e => { e.preventDefault(); try { await signInWithEmailAndPassword(auth, email, password); } catch(e){} }} className="bg-white p-10 rounded-2xl shadow-2xl w-full max-w-md border-t-[12px] border-[#ef7c00] relative z-10 animate-in fade-in zoom-in">
-        <h2 className="text-4xl font-black text-[#002d72] italic mb-8 text-center leading-none uppercase">MARTA OPS</h2>
+        <h2 className="text-4xl font-black text-[#002d72] italic mb-8 text-center leading-none uppercase">FLEET OPS</h2>
         <div className="space-y-4">
-          <input className="w-full p-4 bg-slate-50 border-2 rounded-xl font-bold" placeholder="Supervisor Email" value={email} onChange={e=>setEmail(e.target.value)} required />
-          <input className="w-full p-4 bg-slate-50 border-2 rounded-xl font-bold" placeholder="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} required />
+          <input className="w-full p-4 bg-slate-50 border-2 rounded-xl font-bold" placeholder="supervisor@fleet.com" value={email} onChange={e=>setEmail(e.target.value)} required />
+          <input className="w-full p-4 bg-slate-50 border-2 rounded-xl font-bold" placeholder="password123" type="password" value={password} onChange={e=>setPassword(e.target.value)} required />
           <button className="w-full bg-[#002d72] text-white py-5 rounded-xl font-black uppercase tracking-widest hover:bg-[#ef7c00] transition-all transform active:scale-95 shadow-xl">Authorized Login</button>
         </div>
       </form>
