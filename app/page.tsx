@@ -71,7 +71,10 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
     const [selectedEmp, setSelectedEmp] = useState<any>(null);
     const [newEmpName, setNewEmpName] = useState('');
     const [incData, setIncData] = useState({ type: 'Sick', date: '', count: 1, docReceived: false, supervisorReviewDate: '', notes: '' });
+    
+    // Filters
     const [rosterSearch, setRosterSearch] = useState('');
+    const [logFilter, setLogFilter] = useState({ search: '', type: 'All', sort: 'desc' });
 
     useEffect(() => {
         const q = query(collection(db, "personnel"), orderBy("name"));
@@ -87,7 +90,7 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                 });
             }
         });
-        return logs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        return logs;
     }, [personnel]);
 
     const stats = useMemo(() => {
@@ -116,6 +119,24 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         return { totalOccurrences, typeCounts, topOffenders, monthlyCounts, monthNames };
     }, [allIncidents, personnel]);
 
+    // INTERACTIVE FILTERING
+    const filteredLog = useMemo(() => {
+        let logs = [...allIncidents];
+        if (logFilter.search) logs = logs.filter(l => l.employeeName.toLowerCase().includes(logFilter.search.toLowerCase()));
+        if (logFilter.type !== 'All') logs = logs.filter(l => l.type === logFilter.type);
+        
+        return logs.sort((a, b) => {
+            const dateA = new Date(a.date).getTime();
+            const dateB = new Date(b.date).getTime();
+            return logFilter.sort === 'asc' ? dateA - dateB : dateB - dateA;
+        });
+    }, [allIncidents, logFilter]);
+
+    const jumpToLog = (typeFilter: string = 'All') => {
+        setLogFilter(prev => ({ ...prev, type: typeFilter, search: '' }));
+        setViewMode('log');
+    };
+
     const filteredRoster = useMemo(() => {
         if (!rosterSearch) return stats.topOffenders;
         return stats.topOffenders.filter(p => p.name.toLowerCase().includes(rosterSearch.toLowerCase()));
@@ -143,20 +164,18 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         } catch(err) { showToast("Failed to save", 'error'); }
     };
 
-    // --- NOTICE OF DISCIPLINE GENERATOR (CORRECTED FORMAT) ---
+    // --- STRICT NOTICE OF DISCIPLINE GENERATOR ---
     const handleExportWord = () => {
         if(!selectedEmp) return;
         
         const oneYearAgo = new Date();
         oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
         
-        // Filter ONLY rolling year incidents
         const rollingIncidents = (selectedEmp.incidents || []).filter((inc:any) => {
             const d = new Date(inc.date);
             return d >= oneYearAgo;
         }).sort((a:any, b:any) => new Date(a.date).getTime() - new Date(b.date).getTime());
         
-        // Calculate Level based on Rolling Year Points
         let activePoints = 0;
         let incidentListHTML = "";
         
@@ -164,11 +183,9 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
             const points = parseInt(inc.count) || 0;
             activePoints += points;
             
-            // Format Date US Style MM/DD/YYYY
             const d = new Date(inc.date);
             const formattedDate = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
 
-            // List formatting: "1    03/22/2025" with explicit font
             incidentListHTML += `<p style="margin-left: 40px; margin-bottom: 2px; font-family: 'Arial', sans-serif; font-size: 11pt;">${index + 1}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${formattedDate}</p>`;
         });
 
@@ -178,14 +195,18 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         if(activePoints >= 5) disciplineLevel = "Final Written Warning";
         if(activePoints >= 6) disciplineLevel = "Discharge";
 
-        // Reverse name for "Last, First" format
         const nameParts = selectedEmp.name.split(' ');
         const formalName = nameParts.length > 1 ? `${nameParts[nameParts.length-1]}, ${nameParts[0]}` : selectedEmp.name;
+        
+        // Strict date format for top right
+        const today = new Date();
+        const reportDate = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
 
         const header = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Notice of Discipline</title><style>
             body { font-family: 'Arial', sans-serif; font-size: 11pt; line-height: 1.1; color: #000000; }
             p { margin-top: 5px; margin-bottom: 5px; font-family: 'Arial', sans-serif; font-size: 11pt; }
             .header { text-align: center; font-weight: bold; margin-bottom: 20px; text-transform: uppercase; font-family: 'Arial', sans-serif; }
+            .right-align { text-align: right; }
             .bold { font-weight: bold; }
             .schedule { margin-left: 40px; font-family: 'Arial', sans-serif; font-size: 11pt; }
         </style></head><body>`;
@@ -196,7 +217,7 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
             <div class="header">
                 <p>MARTA ATTENDANCE PROGRAM<br>NOTICE OF DISCIPLINE</p>
             </div>
-            <p style="text-align: right;">DATE: <strong>${new Date().toLocaleDateString()}</strong></p>
+            <p style="text-align: right;">DATE: <strong>${reportDate}</strong></p>
             <br>
             <p>MARTA's Attendance Program states that an employee who accumulates excessive occurrences of absence within any twelve month period (rolling year) will be disciplined according to the following:</p>
             <br>
@@ -305,9 +326,10 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
             {viewMode === 'dashboard' && (
                 <div className="space-y-6 overflow-y-auto pb-10">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Occurrences</p><p className="text-4xl font-black text-[#002d72]">{stats.totalOccurrences}</p></div>
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Employees Tracked</p><p className="text-4xl font-black text-slate-700">{personnel.length}</p></div>
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Incidents by Type</p><div className="space-y-1">{Object.entries(stats.typeCounts).slice(0,3).map(([k,v]) => (<div key={k} className="flex justify-between text-xs font-bold text-slate-600"><span>{k}</span><span>{v}</span></div>))}</div></div>
+                        {/* INTERACTIVE CARDS */}
+                        <div onClick={()=>jumpToLog('All')} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 cursor-pointer hover:border-[#002d72] hover:bg-blue-50 transition-all"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Occurrences</p><p className="text-4xl font-black text-[#002d72]">{stats.totalOccurrences}</p></div>
+                        <div onClick={()=>jumpToLog('All')} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 cursor-pointer hover:border-[#002d72] hover:bg-blue-50 transition-all"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Employees Tracked</p><p className="text-4xl font-black text-slate-700">{personnel.length}</p></div>
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Incidents by Type</p><div className="space-y-1">{Object.entries(stats.typeCounts).slice(0,3).map(([k,v]) => (<div key={k} onClick={()=>jumpToLog(k)} className="flex justify-between text-xs font-bold text-slate-600 cursor-pointer hover:text-[#ef7c00]"><span>{k}</span><span>{v}</span></div>))}</div></div>
                     </div>
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Monthly Incident Summary</h3></div><table className="w-full text-left text-xs"><thead className="text-slate-400 font-black uppercase bg-white border-b"><tr><th className="p-3">Month</th><th className="p-3 text-right">Sick</th><th className="p-3 text-right">FMLA</th><th className="p-3 text-right">No Show</th><th className="p-3 text-right">Total</th></tr></thead><tbody className="divide-y divide-slate-50">{stats.monthNames.map(month => { const data = stats.monthlyCounts[month] || {}; if (!data.Total) return null; return (<tr key={month}><td className="p-3 font-bold text-slate-700">{month}</td><td className="p-3 text-right font-mono text-orange-600">{data['Sick'] || 0}</td><td className="p-3 text-right font-mono text-blue-600">{data['FMLA'] || 0}</td><td className="p-3 text-right font-mono text-red-600">{(data['No Call/No Show'] || 0) + (data['Failure to Report'] || 0)}</td><td className="p-3 text-right font-black">{data.Total || 0}</td></tr>); })}</tbody></table></div>
@@ -338,8 +360,13 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
 
             {viewMode === 'log' && (
                 <div className="bg-white rounded-2xl shadow-lg border border-slate-200 flex-grow overflow-hidden flex flex-col">
+                    <div className="p-4 border-b flex gap-4 bg-slate-50">
+                        <input className="p-2 border rounded font-bold text-xs flex-grow" placeholder="Search Employee..." value={logFilter.search} onChange={e=>setLogFilter({...logFilter, search:e.target.value})} />
+                        <select className="p-2 border rounded font-bold text-xs" value={logFilter.type} onChange={e=>setLogFilter({...logFilter, type:e.target.value})}><option value="All">All Types</option><option>Sick</option><option>FMLA</option><option>No Call/No Show</option></select>
+                        <select className="p-2 border rounded font-bold text-xs" value={logFilter.sort} onChange={e=>setLogFilter({...logFilter, sort:e.target.value})}><option value="desc">Newest First</option><option value="asc">Oldest First</option></select>
+                    </div>
                     <div className="bg-slate-50 border-b p-3 grid grid-cols-12 gap-2 text-[9px] font-black uppercase text-slate-400 tracking-widest"><div className="col-span-3">Employee Name</div><div className="col-span-2">Incident Type</div><div className="col-span-2">Date</div><div className="col-span-1 text-center">Count</div><div className="col-span-1 text-center">Doc?</div><div className="col-span-3">Notes</div></div>
-                    <div className="overflow-y-auto flex-grow divide-y divide-slate-100">{allIncidents.length === 0 ? <div className="p-10 text-center text-slate-300 italic">No attendance records found.</div> : allIncidents.map((log, i) => (<div key={i} className="grid grid-cols-12 gap-2 p-3 items-center hover:bg-blue-50 transition-colors text-xs"><div className="col-span-3 font-bold text-[#002d72]">{log.employeeName}</div><div className="col-span-2 font-medium text-slate-600"><span className={`px-2 py-0.5 rounded text-[10px] uppercase font-black ${log.type==='Sick'?'bg-orange-100 text-orange-700':log.type==='FMLA'?'bg-blue-100 text-blue-700':'bg-red-100 text-red-700'}`}>{log.type}</span></div><div className="col-span-2 font-mono text-slate-500">{log.date}</div><div className="col-span-1 text-center font-black">{log.count}</div><div className="col-span-1 text-center">{log.docReceived ? '✅' : '❌'}</div><div className="col-span-3 text-slate-500 truncate italic">{log.notes || '-'}</div></div>))}</div>
+                    <div className="overflow-y-auto flex-grow divide-y divide-slate-100">{filteredLog.length === 0 ? <div className="p-10 text-center text-slate-300 italic">No attendance records found.</div> : filteredLog.map((log, i) => (<div key={i} className="grid grid-cols-12 gap-2 p-3 items-center hover:bg-blue-50 transition-colors text-xs"><div className="col-span-3 font-bold text-[#002d72]">{log.employeeName}</div><div className="col-span-2 font-medium text-slate-600"><span className={`px-2 py-0.5 rounded text-[10px] uppercase font-black ${log.type==='Sick'?'bg-orange-100 text-orange-700':log.type==='FMLA'?'bg-blue-100 text-blue-700':'bg-red-100 text-red-700'}`}>{log.type}</span></div><div className="col-span-2 font-mono text-slate-500">{log.date}</div><div className="col-span-1 text-center font-black">{log.count}</div><div className="col-span-1 text-center">{log.docReceived ? '✅' : '❌'}</div><div className="col-span-3 text-slate-500 truncate italic">{log.notes || '-'}</div></div>))}</div>
                 </div>
             )}
 
