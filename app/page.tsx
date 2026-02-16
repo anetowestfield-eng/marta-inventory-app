@@ -62,7 +62,7 @@ const calculateDaysOOS = (start: string) => {
     return Math.max(0, Math.ceil((now.getTime() - s.getTime()) / (1000 * 3600 * 24)));
 };
 
-// --- MODULE 1: PERSONNEL MANAGER (EXCEL STYLE) ---
+// --- MODULE 1: PERSONNEL MANAGER (Interactive Dashboard) ---
 const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'success'|'error') => void }) => {
     const [personnel, setPersonnel] = useState<any[]>([]);
     const [viewMode, setViewMode] = useState<'dashboard' | 'log'>('dashboard');
@@ -70,19 +70,17 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
     const [showIncidentModal, setShowIncidentModal] = useState(false);
     const [selectedEmpId, setSelectedEmpId] = useState('');
     const [newEmpName, setNewEmpName] = useState('');
+    const [incData, setIncData] = useState({ type: 'Sick', date: '', count: 1, docReceived: false, supervisorReviewDate: '', notes: '' });
     
-    // Extended Incident Data to match your Excel file
-    const [incData, setIncData] = useState({ 
-        type: 'Sick', date: '', count: 1, 
-        docReceived: false, supervisorReviewDate: '', notes: '' 
-    });
+    // Filters for Master Log
+    const [logFilter, setLogFilter] = useState({ search: '', type: 'All', sort: 'desc' });
 
     useEffect(() => {
         const q = query(collection(db, "personnel"), orderBy("name"));
         return onSnapshot(q, (snap) => setPersonnel(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
     }, []);
 
-    // Helper: Flatten all incidents for the "Master Log" view
+    // Flatten all incidents
     const allIncidents = useMemo(() => {
         let logs: any[] = [];
         personnel.forEach(p => {
@@ -92,260 +90,137 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                 });
             }
         });
-        return logs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        return logs;
     }, [personnel]);
 
-    // Helper: Calculate Dashboard Stats & Monthly Breakdown (Exact match to your Excel Dashboard)
+    // Dashboard Stats
     const stats = useMemo(() => {
         const typeCounts: {[key: string]: number} = {};
-        const monthlyCounts: {[key: string]: {[key: string]: number}} = {}; // { "January": { "Sick": 5, "FMLA": 2 } }
+        const monthlyCounts: {[key: string]: {[key: string]: number}} = {};
         let totalOccurrences = 0;
-        
         const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
         allIncidents.forEach(inc => {
             const c = parseInt(inc.count) || 1;
             totalOccurrences += c;
-            
-            // Type Counts
             typeCounts[inc.type] = (typeCounts[inc.type] || 0) + c;
 
-            // Monthly Breakdown Matrix
             if (inc.date) {
                 const dateObj = new Date(inc.date);
                 const month = monthNames[dateObj.getMonth()];
+                if (!monthlyCounts[month]) monthlyCounts[month] = { Total: 0, Sick: 0, FMLA: 0, "No Call/No Show": 0, "Other": 0 };
                 
-                if (!monthlyCounts[month]) {
-                    monthlyCounts[month] = { Total: 0, Sick: 0, FMLA: 0, "No Call/No Show": 0, "Other": 0 };
-                }
-                
-                // Categorize for the matrix
                 if(inc.type === 'Sick' || inc.type === 'Late Reporting') monthlyCounts[month]['Sick'] += c;
                 else if(inc.type === 'FMLA') monthlyCounts[month]['FMLA'] += c;
                 else if(inc.type === 'No Call/No Show' || inc.type === 'Failure to Report') monthlyCounts[month]['No Call/No Show'] += c;
                 else monthlyCounts[month]['Other'] += c;
-
                 monthlyCounts[month].Total += c;
             }
         });
-
         const topOffenders = [...personnel].sort((a,b) => (b.totalOccurrences || 0) - (a.totalOccurrences || 0)).slice(0, 10);
-
         return { totalOccurrences, typeCounts, topOffenders, monthlyCounts, monthNames };
     }, [allIncidents, personnel]);
 
+    // Filtered Log for View
+    const filteredLog = useMemo(() => {
+        let logs = [...allIncidents];
+        if (logFilter.search) logs = logs.filter(l => l.employeeName.toLowerCase().includes(logFilter.search.toLowerCase()));
+        if (logFilter.type !== 'All') logs = logs.filter(l => l.type === logFilter.type);
+        return logs.sort((a, b) => logFilter.sort === 'asc' ? new Date(a.date).getTime() - new Date(b.date).getTime() : new Date(b.date).getTime() - new Date(a.date).getTime());
+    }, [allIncidents, logFilter]);
+
     const handleAddEmployee = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if(!newEmpName) return;
-        try {
-            await addDoc(collection(db, "personnel"), { name: newEmpName, totalOccurrences: 0, incidents: [], timestamp: serverTimestamp() });
-            showToast(`Added ${newEmpName}`, 'success'); setNewEmpName(''); setShowAddModal(false);
-        } catch(err) { showToast("Failed to add employee", 'error'); }
+        e.preventDefault(); if(!newEmpName) return;
+        try { await addDoc(collection(db, "personnel"), { name: newEmpName, totalOccurrences: 0, incidents: [], timestamp: serverTimestamp() }); showToast(`Added ${newEmpName}`, 'success'); setNewEmpName(''); setShowAddModal(false); } catch(err) { showToast("Failed to add employee", 'error'); }
     };
 
     const handleLogIncident = async () => {
         if(!selectedEmpId) return showToast("Select an employee", 'error');
         try {
             const empRef = doc(db, "personnel", selectedEmpId);
-            const newLog = {
-                type: incData.type,
-                date: incData.date || new Date().toISOString().split('T')[0],
-                count: Number(incData.count),
-                docReceived: incData.docReceived,
-                supervisorReviewDate: incData.supervisorReviewDate,
-                notes: incData.notes,
-                loggedAt: new Date().toISOString()
-            };
-            
-            await updateDoc(empRef, {
-                totalOccurrences: increment(Number(incData.count)),
-                incidents: arrayUnion(newLog)
-            });
-            
-            showToast("Incident Saved", 'success');
-            setShowIncidentModal(false);
+            const newLog = { type: incData.type, date: incData.date || new Date().toISOString().split('T')[0], count: Number(incData.count), docReceived: incData.docReceived, supervisorReviewDate: incData.supervisorReviewDate, notes: incData.notes, loggedAt: new Date().toISOString() };
+            await updateDoc(empRef, { totalOccurrences: increment(Number(incData.count)), incidents: arrayUnion(newLog) });
+            showToast("Incident Saved", 'success'); setShowIncidentModal(false);
             setIncData({ type: 'Sick', date: '', count: 1, docReceived: false, supervisorReviewDate: '', notes: '' });
         } catch(err) { showToast("Failed to save", 'error'); }
     };
 
+    const exportPersonnelReport = async () => {
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet('Incident Dashboard');
+        
+        // Add Dashboard Stats
+        ws.addRow(["Attendance / Incident Dashboard Summary"]);
+        ws.addRow(["Total Incident Occurrences", stats.totalOccurrences]);
+        ws.addRow(["Unique Employees Listed", personnel.length]);
+        ws.addRow([]);
+        ws.addRow(["Monthly Incident Summary by Type"]);
+        ws.addRow(["Month", "Sick", "FMLA", "Failure to Report", "Total"]);
+        stats.monthNames.forEach(m => {
+            const d = stats.monthlyCounts[m];
+            if(d && d.Total > 0) ws.addRow([m, d.Sick, d.FMLA, d['No Call/No Show'], d.Total]);
+        });
+
+        // Add Master Log
+        const logSheet = wb.addWorksheet('Master Log');
+        logSheet.columns = [{header:'Employee Name',key:'name'},{header:'Incident Type',key:'type'},{header:'Date',key:'date'},{header:'Count',key:'count'},{header:'Doc Received',key:'doc'},{header:'Review Date',key:'review'},{header:'Notes',key:'notes'}];
+        allIncidents.forEach(l => logSheet.addRow({
+            name: l.employeeName, type: l.type, date: l.date, count: l.count, doc: l.docReceived?'Yes':'No', review: l.supervisorReviewDate, notes: l.notes
+        }));
+
+        const buf = await wb.xlsx.writeBuffer();
+        saveAs(new Blob([buf]), `Personnel_Report.xlsx`);
+        showToast("Report Exported", 'success');
+    };
+
+    const jumpToLog = (typeFilter: string = 'All') => {
+        setLogFilter(prev => ({ ...prev, type: typeFilter }));
+        setViewMode('log');
+    };
+
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
-            
-            {/* HEADER & CONTROLS */}
             <div className="flex justify-between items-end mb-6">
-                <div>
-                    <h2 className="text-3xl font-black text-[#002d72] italic uppercase tracking-tighter">Attendance Tracker</h2>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Incident Dashboard & Logs</p>
-                </div>
+                <div><h2 className="text-3xl font-black text-[#002d72] italic uppercase tracking-tighter">Attendance Tracker</h2><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Incident Dashboard & Logs</p></div>
                 <div className="flex gap-2">
                     <div className="bg-white border rounded-lg p-1 flex">
                         <button onClick={()=>setViewMode('dashboard')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded transition-all ${viewMode==='dashboard'?'bg-[#002d72] text-white shadow':'text-slate-400 hover:text-[#002d72]'}`}>Dashboard</button>
                         <button onClick={()=>setViewMode('log')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded transition-all ${viewMode==='log'?'bg-[#002d72] text-white shadow':'text-slate-400 hover:text-[#002d72]'}`}>Master Log</button>
                     </div>
+                    <button onClick={exportPersonnelReport} className="px-4 py-2 bg-green-600 text-white rounded-lg font-black uppercase text-[10px] shadow-lg hover:bg-green-700 transition-all">Export Report</button>
                     <button onClick={() => setShowIncidentModal(true)} className="px-6 py-2 bg-[#ef7c00] text-white rounded-lg font-black uppercase text-[10px] shadow-lg hover:bg-orange-600 transition-all">+ Log Incident</button>
                     <button onClick={() => setShowAddModal(true)} className="px-4 py-2 bg-slate-200 text-slate-600 rounded-lg font-black uppercase text-[10px] hover:bg-slate-300 transition-all">+ Emp</button>
                 </div>
             </div>
 
-            {/* DASHBOARD VIEW (Formatted like your Excel) */}
             {viewMode === 'dashboard' && (
                 <div className="space-y-6 overflow-y-auto pb-10">
-                    
-                    {/* SUMMARY CARDS */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Occurrences</p>
-                            <p className="text-4xl font-black text-[#002d72]">{stats.totalOccurrences}</p>
-                        </div>
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Employees Tracked</p>
-                            <p className="text-4xl font-black text-slate-700">{personnel.length}</p>
-                        </div>
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Incidents by Type</p>
-                            <div className="space-y-1">
-                                {Object.entries(stats.typeCounts).slice(0,3).map(([k,v]) => (
-                                    <div key={k} className="flex justify-between text-xs font-bold text-slate-600"><span>{k}</span><span>{v}</span></div>
-                                ))}
-                            </div>
-                        </div>
+                        <div onClick={()=>jumpToLog('All')} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 cursor-pointer hover:border-[#002d72] hover:bg-blue-50 transition-all"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Occurrences</p><p className="text-4xl font-black text-[#002d72]">{stats.totalOccurrences}</p></div>
+                        <div onClick={()=>jumpToLog('All')} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 cursor-pointer hover:border-[#002d72] hover:bg-blue-50 transition-all"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Employees Tracked</p><p className="text-4xl font-black text-slate-700">{personnel.length}</p></div>
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Incidents by Type</p><div className="space-y-1">{Object.entries(stats.typeCounts).slice(0,3).map(([k,v]) => (<div key={k} onClick={()=>jumpToLog(k)} className="flex justify-between text-xs font-bold text-slate-600 cursor-pointer hover:text-[#ef7c00]"><span>{k}</span><span>{v}</span></div>))}</div></div>
                     </div>
-
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* MONTHLY BREAKDOWN TABLE (EXCEL STYLE) */}
-                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                            <div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Monthly Incident Summary</h3></div>
-                            <table className="w-full text-left text-xs">
-                                <thead className="text-slate-400 font-black uppercase bg-white border-b">
-                                    <tr>
-                                        <th className="p-3">Month</th>
-                                        <th className="p-3 text-right">Sick</th>
-                                        <th className="p-3 text-right">FMLA</th>
-                                        <th className="p-3 text-right">No Show</th>
-                                        <th className="p-3 text-right">Total</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-50">
-                                    {stats.monthNames.map(month => {
-                                        const data = stats.monthlyCounts[month] || {};
-                                        if (!data.Total) return null; // Hide empty months
-                                        return (
-                                            <tr key={month}>
-                                                <td className="p-3 font-bold text-slate-700">{month}</td>
-                                                <td className="p-3 text-right font-mono text-orange-600">{data['Sick'] || 0}</td>
-                                                <td className="p-3 text-right font-mono text-blue-600">{data['FMLA'] || 0}</td>
-                                                <td className="p-3 text-right font-mono text-red-600">{data['No Call/No Show'] || 0}</td>
-                                                <td className="p-3 text-right font-black">{data.Total || 0}</td>
-                                            </tr>
-                                        );
-                                    })}
-                                    {Object.keys(stats.monthlyCounts).length === 0 && <tr><td colSpan={5} className="p-4 text-center text-slate-300 italic">No data recorded yet.</td></tr>}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {/* TOP OFFENDERS */}
-                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                            <div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Employees by Total Incidents</h3></div>
-                            <table className="w-full text-left text-xs">
-                                <thead className="text-slate-400 font-black uppercase bg-white border-b"><tr><th className="p-3">Employee Name</th><th className="p-3 text-right">Count</th></tr></thead>
-                                <tbody className="divide-y divide-slate-50">
-                                    {stats.topOffenders.map(emp => (
-                                        <tr key={emp.id} className="hover:bg-red-50 transition-colors">
-                                            <td className="p-3 font-bold text-slate-700">{emp.name}</td>
-                                            <td className={`p-3 text-right font-black ${emp.totalOccurrences > 5 ? 'text-red-500' : 'text-slate-800'}`}>{emp.totalOccurrences}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Monthly Incident Summary</h3></div><table className="w-full text-left text-xs"><thead className="text-slate-400 font-black uppercase bg-white border-b"><tr><th className="p-3">Month</th><th className="p-3 text-right">Sick</th><th className="p-3 text-right">FMLA</th><th className="p-3 text-right">No Show</th><th className="p-3 text-right">Total</th></tr></thead><tbody className="divide-y divide-slate-50">{stats.monthNames.map(month => { const data = stats.monthlyCounts[month] || {}; if (!data.Total) return null; return (<tr key={month}><td className="p-3 font-bold text-slate-700">{month}</td><td className="p-3 text-right font-mono text-orange-600">{data['Sick'] || 0}</td><td className="p-3 text-right font-mono text-blue-600">{data['FMLA'] || 0}</td><td className="p-3 text-right font-mono text-red-600">{(data['No Call/No Show'] || 0) + (data['Failure to Report'] || 0)}</td><td className="p-3 text-right font-black">{data.Total || 0}</td></tr>); })}</tbody></table></div>
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Top Offenders</h3></div><table className="w-full text-left text-xs"><thead className="text-slate-400 font-black uppercase bg-white border-b"><tr><th className="p-3">Employee Name</th><th className="p-3 text-right">Count</th></tr></thead><tbody className="divide-y divide-slate-50">{stats.topOffenders.map(emp => (<tr key={emp.id} className="hover:bg-red-50 transition-colors"><td className="p-3 font-bold text-slate-700">{emp.name}</td><td className={`p-3 text-right font-black ${emp.totalOccurrences > 5 ? 'text-red-500' : 'text-slate-800'}`}>{emp.totalOccurrences}</td></tr>))}</tbody></table></div>
                     </div>
                 </div>
             )}
 
-            {/* LOG VIEW (Matched columns to your Excel) */}
             {viewMode === 'log' && (
                 <div className="bg-white rounded-2xl shadow-lg border border-slate-200 flex-grow overflow-hidden flex flex-col">
-                    <div className="bg-slate-50 border-b p-3 grid grid-cols-12 gap-2 text-[9px] font-black uppercase text-slate-400 tracking-widest">
-                        <div className="col-span-3">Employee</div>
-                        <div className="col-span-2">Type</div>
-                        <div className="col-span-2">Date</div>
-                        <div className="col-span-1 text-center">Count</div>
-                        <div className="col-span-1 text-center">Doc?</div>
-                        <div className="col-span-2">Sup. Review</div>
-                        <div className="col-span-1">Notes</div>
+                    <div className="p-4 border-b flex gap-4 bg-slate-50">
+                        <input className="p-2 border rounded font-bold text-xs flex-grow" placeholder="Search Employee..." value={logFilter.search} onChange={e=>setLogFilter({...logFilter, search:e.target.value})} />
+                        <select className="p-2 border rounded font-bold text-xs" value={logFilter.type} onChange={e=>setLogFilter({...logFilter, type:e.target.value})}><option value="All">All Types</option><option>Sick</option><option>FMLA</option><option>No Call/No Show</option></select>
+                        <select className="p-2 border rounded font-bold text-xs" value={logFilter.sort} onChange={e=>setLogFilter({...logFilter, sort:e.target.value})}><option value="desc">Newest First</option><option value="asc">Oldest First</option></select>
                     </div>
-                    <div className="overflow-y-auto flex-grow divide-y divide-slate-100">
-                        {allIncidents.length === 0 ? <div className="p-10 text-center text-slate-300 italic">No attendance records found.</div> : allIncidents.map((log, i) => (
-                            <div key={i} className="grid grid-cols-12 gap-2 p-3 items-center hover:bg-blue-50 transition-colors text-xs">
-                                <div className="col-span-3 font-bold text-[#002d72]">{log.employeeName}</div>
-                                <div className="col-span-2 font-medium text-slate-600">
-                                    <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-black ${log.type==='Sick'?'bg-orange-100 text-orange-700':log.type==='FMLA'?'bg-blue-100 text-blue-700':'bg-red-100 text-red-700'}`}>{log.type}</span>
-                                </div>
-                                <div className="col-span-2 font-mono text-slate-500">{log.date}</div>
-                                <div className="col-span-1 text-center font-black">{log.count}</div>
-                                <div className="col-span-1 text-center">{log.docReceived ? '✅' : '❌'}</div>
-                                <div className="col-span-2 text-slate-500">{log.supervisorReviewDate || '-'}</div>
-                                <div className="col-span-1 text-slate-500 truncate italic" title={log.notes}>{log.notes || '-'}</div>
-                            </div>
-                        ))}
-                    </div>
+                    <div className="bg-white border-b p-3 grid grid-cols-12 gap-2 text-[9px] font-black uppercase text-slate-400 tracking-widest"><div className="col-span-3">Employee Name</div><div className="col-span-2">Incident Type</div><div className="col-span-2">Date</div><div className="col-span-1 text-center">Count</div><div className="col-span-1 text-center">Doc?</div><div className="col-span-3">Notes</div></div>
+                    <div className="overflow-y-auto flex-grow divide-y divide-slate-100">{filteredLog.length === 0 ? <div className="p-10 text-center text-slate-300 italic">No attendance records found.</div> : filteredLog.map((log, i) => (<div key={i} className="grid grid-cols-12 gap-2 p-3 items-center hover:bg-blue-50 transition-colors text-xs"><div className="col-span-3 font-bold text-[#002d72]">{log.employeeName}</div><div className="col-span-2 font-medium text-slate-600"><span className={`px-2 py-0.5 rounded text-[10px] uppercase font-black ${log.type==='Sick'?'bg-orange-100 text-orange-700':log.type==='FMLA'?'bg-blue-100 text-blue-700':'bg-red-100 text-red-700'}`}>{log.type}</span></div><div className="col-span-2 font-mono text-slate-500">{log.date}</div><div className="col-span-1 text-center font-black">{log.count}</div><div className="col-span-1 text-center">{log.docReceived ? '✅' : '❌'}</div><div className="col-span-3 text-slate-500 truncate italic">{log.notes || '-'}</div></div>))}</div>
                 </div>
             )}
 
-            {/* MODALS */}
-            {showAddModal && (
-                <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-                    <div className="bg-white p-6 rounded-2xl w-full max-w-sm">
-                        <h3 className="text-xl font-black text-[#002d72] mb-4">Add Employee</h3>
-                        <input className="w-full p-3 border rounded mb-4 font-bold" placeholder="Full Name (e.g. John Doe)" value={newEmpName} onChange={e=>setNewEmpName(e.target.value)} />
-                        <div className="flex gap-2"><button onClick={()=>setShowAddModal(false)} className="flex-1 py-3 bg-slate-100 rounded font-bold text-xs">Cancel</button><button onClick={handleAddEmployee} className="flex-1 py-3 bg-[#002d72] text-white rounded font-bold text-xs">Add</button></div>
-                    </div>
-                </div>
-            )}
-
-            {showIncidentModal && (
-                <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-                    <div className="bg-white p-8 rounded-2xl w-full max-w-md shadow-2xl">
-                        <h3 className="text-2xl font-black text-[#ef7c00] mb-6 uppercase">Log Attendance Incident</h3>
-                        
-                        <label className="text-[10px] font-black text-slate-400 uppercase">Employee</label>
-                        <select className="w-full p-3 border-2 rounded-lg font-bold mb-4" value={selectedEmpId} onChange={e=>setSelectedEmpId(e.target.value)}>
-                            <option value="">-- Select Employee --</option>
-                            {personnel.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
-
-                        <div className="grid grid-cols-2 gap-4 mb-4">
-                            <div><label className="text-[10px] font-black text-slate-400 uppercase">Type</label>
-                            <select className="w-full p-3 border-2 rounded-lg font-bold text-sm" value={incData.type} onChange={e=>setIncData({...incData, type:e.target.value})}>
-                                <option>Sick</option><option>FMLA</option><option>Failure to Report</option><option>Late Reporting</option><option>No Call/No Show</option>
-                            </select></div>
-                            <div><label className="text-[10px] font-black text-slate-400 uppercase">Occurrences</label>
-                            <input type="number" className="w-full p-3 border-2 rounded-lg font-bold text-sm" value={incData.count} onChange={e=>setIncData({...incData, count:Number(e.target.value)})} /></div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4 mb-4">
-                             <div><label className="text-[10px] font-black text-slate-400 uppercase">Incident Date</label>
-                             <input type="date" className="w-full p-3 border-2 rounded-lg font-bold text-sm" value={incData.date} onChange={e=>setIncData({...incData, date:e.target.value})} /></div>
-                             
-                             <div><label className="text-[10px] font-black text-slate-400 uppercase">Review Date</label>
-                             <input type="date" className="w-full p-3 border-2 rounded-lg font-bold text-sm" value={incData.supervisorReviewDate} onChange={e=>setIncData({...incData, supervisorReviewDate:e.target.value})} /></div>
-                        </div>
-
-                        <div className="flex items-center gap-3 mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100 cursor-pointer" onClick={()=>setIncData({...incData, docReceived:!incData.docReceived})}>
-                            <div className={`w-5 h-5 rounded border flex items-center justify-center ${incData.docReceived ? 'bg-blue-500 border-blue-500 text-white' : 'bg-white border-slate-300'}`}>{incData.docReceived && '✓'}</div>
-                            <span className="text-xs font-bold text-blue-800">Documentation Received?</span>
-                        </div>
-
-                        <textarea className="w-full p-3 border-2 rounded-lg h-24 mb-6 font-medium text-sm" placeholder="Notes / Details..." value={incData.notes} onChange={e=>setIncData({...incData, notes:e.target.value})} />
-
-                        <div className="flex gap-4">
-                            <button onClick={()=>setShowIncidentModal(false)} className="w-1/3 py-3 bg-slate-100 rounded-xl font-black uppercase text-xs">Cancel</button>
-                            <button onClick={handleLogIncident} className="w-2/3 py-3 bg-[#002d72] text-white rounded-xl font-black uppercase text-xs shadow-lg hover:bg-blue-900">Save Record</button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {showAddModal && (<div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"><div className="bg-white p-6 rounded-2xl w-full max-w-sm"><h3 className="text-xl font-black text-[#002d72] mb-4">Add Employee</h3><input className="w-full p-3 border rounded mb-4 font-bold" placeholder="Full Name (e.g. John Doe)" value={newEmpName} onChange={e=>setNewEmpName(e.target.value)} /><div className="flex gap-2"><button onClick={()=>setShowAddModal(false)} className="flex-1 py-3 bg-slate-100 rounded font-bold text-xs">Cancel</button><button onClick={handleAddEmployee} className="flex-1 py-3 bg-[#002d72] text-white rounded font-bold text-xs">Add</button></div></div></div>)}
+            {showIncidentModal && (<div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"><div className="bg-white p-8 rounded-2xl w-full max-w-md shadow-2xl"><h3 className="text-2xl font-black text-[#ef7c00] mb-6 uppercase">Log Attendance Incident</h3><label className="text-[10px] font-black text-slate-400 uppercase">Employee</label><select className="w-full p-3 border-2 rounded-lg font-bold mb-4" value={selectedEmpId} onChange={e=>setSelectedEmpId(e.target.value)}><option value="">-- Select Employee --</option>{personnel.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select><div className="grid grid-cols-2 gap-4 mb-4"><div><label className="text-[10px] font-black text-slate-400 uppercase">Type</label><select className="w-full p-3 border-2 rounded-lg font-bold text-sm" value={incData.type} onChange={e=>setIncData({...incData, type:e.target.value})}><option>Sick</option><option>FMLA</option><option>Failure to Report</option><option>Late Reporting</option><option>NC/NS</option></select></div><div><label className="text-[10px] font-black text-slate-400 uppercase">Occurrences</label><input type="number" className="w-full p-3 border-2 rounded-lg font-bold text-sm" value={incData.count} onChange={e=>setIncData({...incData, count:Number(e.target.value)})} /></div></div><div className="grid grid-cols-2 gap-4 mb-4"><div><label className="text-[10px] font-black text-slate-400 uppercase">Incident Date</label><input type="date" className="w-full p-3 border-2 rounded-lg font-bold text-sm" value={incData.date} onChange={e=>setIncData({...incData, date:e.target.value})} /></div><div><label className="text-[10px] font-black text-slate-400 uppercase">Review Date</label><input type="date" className="w-full p-3 border-2 rounded-lg font-bold text-sm" value={incData.supervisorReviewDate} onChange={e=>setIncData({...incData, supervisorReviewDate:e.target.value})} /></div></div><div className="flex items-center gap-3 mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100 cursor-pointer" onClick={()=>setIncData({...incData, docReceived:!incData.docReceived})}><div className={`w-5 h-5 rounded border flex items-center justify-center ${incData.docReceived ? 'bg-blue-500 border-blue-500 text-white' : 'bg-white border-slate-300'}`}>{incData.docReceived && '✓'}</div><span className="text-xs font-bold text-blue-800">Documentation Received?</span></div><textarea className="w-full p-3 border-2 rounded-lg h-24 mb-6 font-medium text-sm" placeholder="Notes / Details..." value={incData.notes} onChange={e=>setIncData({...incData, notes:e.target.value})} /><div className="flex gap-4"><button onClick={()=>setShowIncidentModal(false)} className="w-1/3 py-3 bg-slate-100 rounded-xl font-black uppercase text-xs">Cancel</button><button onClick={handleLogIncident} className="w-2/3 py-3 bg-[#002d72] text-white rounded-xl font-black uppercase text-xs shadow-lg hover:bg-blue-900">Save Record</button></div></div></div>)}
         </div>
     );
 };
@@ -483,13 +358,15 @@ const ShiftHandover = ({ buses, showToast }: { buses: any[], showToast: (m:strin
     );
 };
 
-// --- COMPONENT: BUS DETAIL POPUP (WITH DELETE BUTTON) ---
+// --- COMPONENT: BUS DETAIL POPUP (WITH DELETE & RESET) ---
 const BusDetailView = ({ bus, onClose, showToast }: { bus: any; onClose: () => void; showToast: (m:string, t:'success'|'error')=>void }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
     const [historyLogs, setHistoryLogs] = useState<any[]>([]); 
     const [editData, setEditData] = useState({ status: bus.status || 'Active', location: bus.location || '', notes: bus.notes || '', oosStartDate: bus.oosStartDate || '', expectedReturnDate: bus.expectedReturnDate || '', actualReturnDate: bus.actualReturnDate || '' });
+    
     useEffect(() => { if (showHistory) return onSnapshot(query(collection(db, "buses", bus.number, "history"), orderBy("timestamp", "desc")), (snap) => setHistoryLogs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })))); }, [showHistory, bus.number]);
+    
     const handleSave = async () => {
         try {
             const busRef = doc(db, "buses", bus.number);
@@ -504,15 +381,42 @@ const BusDetailView = ({ bus, onClose, showToast }: { bus: any; onClose: () => v
             showToast(`Bus #${bus.number} updated`, 'success'); setIsEditing(false);
         } catch (err) { showToast("Save failed", 'error'); }
     };
+
     const handleDeleteLog = async (logId: string) => {
         if(!confirm("Are you sure you want to delete this log entry?")) return;
         try { await deleteDoc(doc(db, "buses", bus.number, "history", logId)); showToast("Log deleted", 'success'); } 
         catch(err) { showToast("Failed to delete log", 'error'); }
     };
 
+    // --- NEW: RESET BUTTON LOGIC ---
+    const handleResetBus = async () => {
+        if(!confirm("⚠️ WARNING: This will clear ALL notes, locations, and dates for this bus and set it to 'Active'. Continue?")) return;
+        try {
+            const busRef = doc(db, "buses", bus.number);
+            const resetData = { status: 'Active', location: '', notes: '', oosStartDate: '', expectedReturnDate: '', actualReturnDate: '', timestamp: serverTimestamp() };
+            await setDoc(busRef, resetData, { merge: true });
+            await logHistory(bus.number, "RESET", "Bus reset to default state.", auth.currentUser?.email || 'Unknown');
+            showToast(`Bus #${bus.number} has been reset.`, 'success');
+            onClose();
+        } catch(err) { showToast("Reset failed.", 'error'); }
+    };
+
     if (showHistory) return (<div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-lg h-[600px] flex flex-col animate-in zoom-in-95"><div className="flex justify-between items-center mb-4 border-b pb-4 font-black text-[#002d72] uppercase"><span>History: #{bus.number}</span><button onClick={()=>setShowHistory(false)} className="text-xs text-slate-400">Back</button></div><div className="flex-grow overflow-y-auto space-y-3">{historyLogs.map(l => (<div key={l.id} className="p-3 bg-slate-50 rounded-lg border border-slate-100 relative group"><div className="flex justify-between text-[8px] font-black uppercase text-slate-400 mb-1"><span>{l.action}</span><span>{formatTime(l.timestamp)}</span></div><p className="text-xs font-bold text-slate-700 whitespace-pre-wrap leading-tight">{l.details}</p><button onClick={() => handleDeleteLog(l.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity text-xs font-bold">DELETE</button></div>))}</div></div>);
     if (isEditing) return (<div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-2xl animate-in zoom-in-95"><h3 className="text-2xl font-black text-[#002d72] mb-6 uppercase italic">Edit Bus #{bus.number}</h3><div className="grid grid-cols-2 gap-4 mb-4"><select className="p-3 bg-slate-50 border-2 rounded-lg font-bold" value={editData.status} onChange={e=>setEditData({...editData, status:e.target.value})}><option value="Active">Ready</option><option value="In Shop">In Shop</option><option value="Engine">Engine</option><option value="Body Shop">Body Shop</option><option value="Vendor">Vendor</option><option value="Brakes">Brakes</option><option value="Safety">Safety</option></select><input className="p-3 bg-slate-50 border-2 rounded-lg font-bold" value={editData.location} onChange={e=>setEditData({...editData, location:e.target.value})} placeholder="Location" /></div><textarea className="w-full p-3 bg-slate-50 border-2 rounded-lg h-24 mb-4 font-bold" value={editData.notes} onChange={e=>setEditData({...editData, notes:e.target.value})} placeholder="Maintenance Notes" /><div className="grid grid-cols-3 gap-4 mb-6 text-[9px] font-black uppercase text-slate-400"><div>OOS Date<input type="date" className="w-full p-2 border rounded mt-1 font-bold text-slate-900" value={editData.oosStartDate} onChange={e=>setEditData({...editData, oosStartDate:e.target.value})} /></div><div>Exp Return<input type="date" className="w-full p-2 border rounded mt-1 font-bold text-slate-900" value={editData.expectedReturnDate} onChange={e=>setEditData({...editData, expectedReturnDate:e.target.value})} /></div><div>Act Return<input type="date" className="w-full p-2 border rounded mt-1 font-bold text-slate-900" value={editData.actualReturnDate} onChange={e=>setEditData({...editData, actualReturnDate:e.target.value})} /></div></div><div className="flex gap-4"><button onClick={()=>setIsEditing(false)} className="w-1/2 py-3 bg-slate-100 rounded-xl font-black uppercase text-xs">Cancel</button><button onClick={handleSave} className="w-1/2 py-3 bg-[#002d72] text-white rounded-xl font-black uppercase text-xs shadow-lg">Save Changes</button></div></div>);
-    return (<div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-2xl animate-in zoom-in-95"><div className="flex justify-between items-start mb-6 border-b pb-4"><div><h3 className="text-4xl font-black text-[#002d72] italic uppercase">Bus #{bus.number}</h3><span className={`inline-block mt-2 px-3 py-1 rounded-full text-[10px] font-black uppercase ${bus.status==='Active'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{bus.status}</span></div><button onClick={onClose} className="text-slate-400 text-2xl font-bold hover:text-slate-600 transition-colors">✕</button></div><div className="bg-slate-50 p-4 rounded-xl mb-6"><p className="text-[10px] font-black uppercase text-slate-400 mb-2">Fault Details</p><p className="text-lg font-medium text-slate-800">{bus.notes || "No active faults."}</p></div><div className="grid grid-cols-3 gap-4 mb-6"><div><p className="text-[9px] font-black uppercase text-slate-400">OOS Date</p><p className="text-xl font-black text-[#002d72]">{bus.oosStartDate || '--'}</p></div><div><p className="text-[9px] font-black uppercase text-slate-400">Exp Return</p><p className="text-xl font-black text-[#ef7c00]">{bus.expectedReturnDate || '--'}</p></div><div><p className="text-[9px] font-black uppercase text-slate-400">Act Return</p><p className="text-xl font-black text-green-600">{bus.actualReturnDate || '--'}</p></div></div><div className="flex justify-between pt-6 border-t"><button onClick={()=>setShowHistory(true)} className="px-5 py-3 bg-slate-100 text-slate-600 rounded-lg text-[10px] font-black uppercase">📜 History</button><div className="flex gap-3"><button onClick={()=>setIsEditing(true)} className="px-8 py-3 bg-slate-100 text-[#002d72] rounded-lg text-[10px] font-black uppercase">Edit</button><button onClick={onClose} className="px-8 py-3 bg-[#002d72] text-white rounded-lg text-[10px] font-black uppercase">Close</button></div></div></div>);
+    return (
+        <div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-2xl animate-in zoom-in-95">
+            <div className="flex justify-between items-start mb-6 border-b pb-4">
+                <div><h3 className="text-4xl font-black text-[#002d72] italic uppercase">Bus #{bus.number}</h3><span className={`inline-block mt-2 px-3 py-1 rounded-full text-[10px] font-black uppercase ${bus.status==='Active'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{bus.status}</span></div>
+                <div className="flex gap-2">
+                    <button onClick={handleResetBus} className="text-red-400 text-xs font-black uppercase border border-red-100 bg-red-50 px-3 py-1 rounded hover:bg-red-500 hover:text-white transition-colors">Reset</button>
+                    <button onClick={onClose} className="text-slate-400 text-2xl font-bold hover:text-slate-600 transition-colors">✕</button>
+                </div>
+            </div>
+            <div className="bg-slate-50 p-4 rounded-xl mb-6"><p className="text-[10px] font-black uppercase text-slate-400 mb-2">Fault Details</p><p className="text-lg font-medium text-slate-800">{bus.notes || "No active faults."}</p></div>
+            <div className="grid grid-cols-3 gap-4 mb-6"><div><p className="text-[9px] font-black uppercase text-slate-400">OOS Date</p><p className="text-xl font-black text-[#002d72]">{bus.oosStartDate || '--'}</p></div><div><p className="text-[9px] font-black uppercase text-slate-400">Exp Return</p><p className="text-xl font-black text-[#ef7c00]">{bus.expectedReturnDate || '--'}</p></div><div><p className="text-[9px] font-black uppercase text-slate-400">Act Return</p><p className="text-xl font-black text-green-600">{bus.actualReturnDate || '--'}</p></div></div>
+            <div className="flex justify-between pt-6 border-t"><button onClick={()=>setShowHistory(true)} className="px-5 py-3 bg-slate-100 text-slate-600 rounded-lg text-[10px] font-black uppercase">📜 History</button><div className="flex gap-3"><button onClick={()=>setIsEditing(true)} className="px-8 py-3 bg-slate-100 text-[#002d72] rounded-lg text-[10px] font-black uppercase">Edit</button><button onClick={onClose} className="px-8 py-3 bg-[#002d72] text-white rounded-lg text-[10px] font-black uppercase">Close</button></div></div>
+        </div>
+    );
 };
 
 // --- COMPONENT: DATA ENTRY ---
@@ -553,12 +457,8 @@ export default function FleetManager() {
 
   const holdStatuses = ['On Hold', 'Engine', 'Body Shop', 'Vendor', 'Brakes', 'Safety'];
   
-  // ADMIN CHECK: Add your emails here
-  const isAdmin = user && (
-      user.email === 'anetowestfield@gmail.com' || 
-      user.email === 'supervisor@fleet.com' ||
-      user.email === 'admin@admin.com'
-  );
+  // ADMIN CHECK
+  const isAdmin = user && (user.email === 'anetowestfield@gmail.com' || user.email === 'supervisor@fleet.com' || user.email === 'admin@admin.com');
 
   const triggerToast = (msg: string, type: 'success' | 'error') => { setToast({ msg, type }); };
 
