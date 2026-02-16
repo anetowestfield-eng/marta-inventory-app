@@ -62,7 +62,7 @@ const calculateDaysOOS = (start: string) => {
     return Math.max(0, Math.ceil((now.getTime() - s.getTime()) / (1000 * 3600 * 24)));
 };
 
-// --- MODULE 1: PERSONNEL MANAGER (With Letter Export) ---
+// --- MODULE 1: PERSONNEL MANAGER (With Delete & Letter) ---
 const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'success'|'error') => void }) => {
     const [personnel, setPersonnel] = useState<any[]>([]);
     const [viewMode, setViewMode] = useState<'dashboard' | 'log'>('dashboard');
@@ -71,8 +71,6 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
     const [selectedEmp, setSelectedEmp] = useState<any>(null);
     const [newEmpName, setNewEmpName] = useState('');
     const [incData, setIncData] = useState({ type: 'Sick', date: '', count: 1, docReceived: false, supervisorReviewDate: '', notes: '' });
-    
-    // Filters
     const [rosterSearch, setRosterSearch] = useState('');
     const [logFilter, setLogFilter] = useState({ search: '', type: 'All', sort: 'desc' });
 
@@ -119,7 +117,7 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         return { totalOccurrences, typeCounts, topOffenders, monthlyCounts, monthNames };
     }, [allIncidents, personnel]);
 
-    // INTERACTIVE FILTERING
+    // FILTERING LOGIC
     const filteredLog = useMemo(() => {
         let logs = [...allIncidents];
         if (logFilter.search) logs = logs.filter(l => l.employeeName.toLowerCase().includes(logFilter.search.toLowerCase()));
@@ -141,6 +139,8 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         if (!rosterSearch) return stats.topOffenders;
         return stats.topOffenders.filter(p => p.name.toLowerCase().includes(rosterSearch.toLowerCase()));
     }, [stats.topOffenders, rosterSearch]);
+
+    // --- ACTIONS ---
 
     const handleAddEmployee = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -164,7 +164,44 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         } catch(err) { showToast("Failed to save", 'error'); }
     };
 
-    // --- STRICT NOTICE OF DISCIPLINE GENERATOR ---
+    // --- NEW: DELETE INCIDENT FUNCTION ---
+    const handleDeleteIncident = async (empId: string, incident: any) => {
+        if(!confirm("Are you sure you want to permanently delete this incident record?")) return;
+        try {
+            const empRef = doc(db, "personnel", empId);
+            
+            // 1. Get current data to ensure we filter the exact array
+            const empSnap = await getDoc(empRef);
+            if (!empSnap.exists()) return;
+            
+            const currentIncidents = empSnap.data().incidents || [];
+            
+            // 2. Filter out the incident (using loggedAt as unique ID if possible, or exact match)
+            // Note: The object from 'allIncidents' has extra fields like employeeName/Id, we need to match carefully.
+            const updatedIncidents = currentIncidents.filter((i: any) => i.loggedAt !== incident.loggedAt);
+            
+            // 3. Recalculate Total Points locally to be safe
+            const newTotal = updatedIncidents.reduce((sum: number, i: any) => sum + (Number(i.count) || 0), 0);
+            
+            // 4. Update DB
+            await updateDoc(empRef, {
+                incidents: updatedIncidents,
+                totalOccurrences: newTotal
+            });
+            
+            showToast("Incident Deleted", 'success');
+            // If inside popup, update selectedEmp state (optional, snap listener handles it usually)
+            if (selectedEmp && selectedEmp.id === empId) {
+                setSelectedEmp({ ...selectedEmp, incidents: updatedIncidents, totalOccurrences: newTotal });
+            }
+
+        } catch (err) {
+            console.error(err);
+            showToast("Delete Failed", 'error');
+        }
+    };
+
+    // --- WORD EXPORT ---
     const handleExportWord = () => {
         if(!selectedEmp) return;
         
@@ -198,7 +235,6 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         const nameParts = selectedEmp.name.split(' ');
         const formalName = nameParts.length > 1 ? `${nameParts[nameParts.length-1]}, ${nameParts[0]}` : selectedEmp.name;
         
-        // Strict date format for top right
         const today = new Date();
         const reportDate = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
 
@@ -302,7 +338,7 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Incident History</h4>
                             <div className="border rounded-xl overflow-hidden">
                                 <table className="w-full text-left text-xs">
-                                    <thead className="bg-slate-50 border-b font-black text-slate-500"><tr><th className="p-3">Date</th><th className="p-3">Type</th><th className="p-3 text-center">Pts</th><th className="p-3">Notes</th></tr></thead>
+                                    <thead className="bg-slate-50 border-b font-black text-slate-500"><tr><th className="p-3">Date</th><th className="p-3">Type</th><th className="p-3 text-center">Pts</th><th className="p-3">Notes</th><th className="p-3 text-center">Action</th></tr></thead>
                                     <tbody className="divide-y">
                                         {selectedEmp.incidents && selectedEmp.incidents.length > 0 ? selectedEmp.incidents.slice().reverse().map((inc: any, i: number) => {
                                             const isOld = (new Date().getTime() - new Date(inc.date).getTime()) / (1000 * 60 * 60 * 24) > 365;
@@ -312,9 +348,10 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                                                     <td className="p-3 font-bold">{inc.type}</td>
                                                     <td className="p-3 text-center font-black">{inc.count}</td>
                                                     <td className="p-3 italic truncate max-w-[150px]">{inc.notes}</td>
+                                                    <td className="p-3 text-center"><button onClick={() => handleDeleteIncident(selectedEmp.id, inc)} className="text-red-400 hover:text-red-600 font-bold">🗑️</button></td>
                                                 </tr>
                                             );
-                                        }) : <tr><td colSpan={4} className="p-4 text-center italic text-slate-300">No history found.</td></tr>}
+                                        }) : <tr><td colSpan={5} className="p-4 text-center italic text-slate-300">No history found.</td></tr>}
                                     </tbody>
                                 </table>
                             </div>
@@ -326,7 +363,6 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
             {viewMode === 'dashboard' && (
                 <div className="space-y-6 overflow-y-auto pb-10">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {/* INTERACTIVE CARDS */}
                         <div onClick={()=>jumpToLog('All')} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 cursor-pointer hover:border-[#002d72] hover:bg-blue-50 transition-all"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Occurrences</p><p className="text-4xl font-black text-[#002d72]">{stats.totalOccurrences}</p></div>
                         <div onClick={()=>jumpToLog('All')} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 cursor-pointer hover:border-[#002d72] hover:bg-blue-50 transition-all"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Employees Tracked</p><p className="text-4xl font-black text-slate-700">{personnel.length}</p></div>
                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Incidents by Type</p><div className="space-y-1">{Object.entries(stats.typeCounts).slice(0,3).map(([k,v]) => (<div key={k} onClick={()=>jumpToLog(k)} className="flex justify-between text-xs font-bold text-slate-600 cursor-pointer hover:text-[#ef7c00]"><span>{k}</span><span>{v}</span></div>))}</div></div>
@@ -365,8 +401,8 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                         <select className="p-2 border rounded font-bold text-xs" value={logFilter.type} onChange={e=>setLogFilter({...logFilter, type:e.target.value})}><option value="All">All Types</option><option>Sick</option><option>FMLA</option><option>No Call/No Show</option></select>
                         <select className="p-2 border rounded font-bold text-xs" value={logFilter.sort} onChange={e=>setLogFilter({...logFilter, sort:e.target.value})}><option value="desc">Newest First</option><option value="asc">Oldest First</option></select>
                     </div>
-                    <div className="bg-slate-50 border-b p-3 grid grid-cols-12 gap-2 text-[9px] font-black uppercase text-slate-400 tracking-widest"><div className="col-span-3">Employee Name</div><div className="col-span-2">Incident Type</div><div className="col-span-2">Date</div><div className="col-span-1 text-center">Count</div><div className="col-span-1 text-center">Doc?</div><div className="col-span-3">Notes</div></div>
-                    <div className="overflow-y-auto flex-grow divide-y divide-slate-100">{filteredLog.length === 0 ? <div className="p-10 text-center text-slate-300 italic">No attendance records found.</div> : filteredLog.map((log, i) => (<div key={i} className="grid grid-cols-12 gap-2 p-3 items-center hover:bg-blue-50 transition-colors text-xs"><div className="col-span-3 font-bold text-[#002d72]">{log.employeeName}</div><div className="col-span-2 font-medium text-slate-600"><span className={`px-2 py-0.5 rounded text-[10px] uppercase font-black ${log.type==='Sick'?'bg-orange-100 text-orange-700':log.type==='FMLA'?'bg-blue-100 text-blue-700':'bg-red-100 text-red-700'}`}>{log.type}</span></div><div className="col-span-2 font-mono text-slate-500">{log.date}</div><div className="col-span-1 text-center font-black">{log.count}</div><div className="col-span-1 text-center">{log.docReceived ? '✅' : '❌'}</div><div className="col-span-3 text-slate-500 truncate italic">{log.notes || '-'}</div></div>))}</div>
+                    <div className="bg-slate-50 border-b p-3 grid grid-cols-12 gap-2 text-[9px] font-black uppercase text-slate-400 tracking-widest"><div className="col-span-3">Employee Name</div><div className="col-span-2">Incident Type</div><div className="col-span-2">Date</div><div className="col-span-1 text-center">Count</div><div className="col-span-1 text-center">Doc?</div><div className="col-span-2">Notes</div><div className="col-span-1 text-center">Action</div></div>
+                    <div className="overflow-y-auto flex-grow divide-y divide-slate-100">{filteredLog.length === 0 ? <div className="p-10 text-center text-slate-300 italic">No attendance records found.</div> : filteredLog.map((log, i) => (<div key={i} className="grid grid-cols-12 gap-2 p-3 items-center hover:bg-blue-50 transition-colors text-xs"><div className="col-span-3 font-bold text-[#002d72]">{log.employeeName}</div><div className="col-span-2 font-medium text-slate-600"><span className={`px-2 py-0.5 rounded text-[10px] uppercase font-black ${log.type==='Sick'?'bg-orange-100 text-orange-700':log.type==='FMLA'?'bg-blue-100 text-blue-700':'bg-red-100 text-red-700'}`}>{log.type}</span></div><div className="col-span-2 font-mono text-slate-500">{log.date}</div><div className="col-span-1 text-center font-black">{log.count}</div><div className="col-span-1 text-center">{log.docReceived ? '✅' : '❌'}</div><div className="col-span-2 text-slate-500 truncate italic">{log.notes || '-'}</div><div className="col-span-1 text-center"><button onClick={() => handleDeleteIncident(log.employeeId, log)} className="text-red-400 hover:text-red-600 font-bold">🗑️</button></div></div>))}</div>
                 </div>
             )}
 
