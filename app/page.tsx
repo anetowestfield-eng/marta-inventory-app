@@ -143,28 +143,28 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         } catch(err) { showToast("Failed to save", 'error'); }
     };
 
-    // --- NOTICE OF DISCIPLINE GENERATOR ---
+    // --- STRICT NOTICE OF DISCIPLINE GENERATOR (NO TABLES) ---
     const handleExportWord = () => {
         if(!selectedEmp) return;
         
         const oneYearAgo = new Date();
         oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
         
-        const rollingIncidents = (selectedEmp.incidents || []).sort((a:any, b:any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        // Filter ONLY rolling year incidents
+        const rollingIncidents = (selectedEmp.incidents || []).filter((inc:any) => {
+            const d = new Date(inc.date);
+            return d >= oneYearAgo;
+        }).sort((a:any, b:any) => new Date(a.date).getTime() - new Date(b.date).getTime());
         
         // Calculate Level based on Rolling Year Points
         let activePoints = 0;
-        let incidentRows = "";
+        let incidentListHTML = "";
         
-        rollingIncidents.forEach((inc: any) => {
-            const incDate = new Date(inc.date);
-            const isOld = incDate < oneYearAgo;
+        rollingIncidents.forEach((inc: any, index: number) => {
             const points = parseInt(inc.count) || 0;
-            
-            if(!isOld) activePoints += points;
-
-            const rowStyle = isOld ? "color: red;" : "color: black;";
-            incidentRows += `<tr><td style="border:1px solid #000; padding:5px; ${rowStyle}">${points}</td><td style="border:1px solid #000; padding:5px; ${rowStyle}">${inc.date} (${inc.type})</td></tr>`;
+            activePoints += points;
+            // List formatting: "1    03/22/2025"
+            incidentListHTML += `<p style="margin-left: 40px; margin-bottom: 2px;">${index + 1}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${inc.date}</p>`;
         });
 
         let disciplineLevel = "None";
@@ -173,78 +173,64 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         if(activePoints >= 5) disciplineLevel = "Final Written Warning";
         if(activePoints >= 6) disciplineLevel = "Discharge";
 
-        const header = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Discipline Notice</title><style>
-            body { font-family: 'Arial', sans-serif; font-size: 11pt; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 10px; }
-            th, td { border: 1px solid #000; padding: 5px; text-align: center; }
-            .header { text-align: center; font-weight: bold; margin-bottom: 20px; }
-            .section { margin-bottom: 15px; }
+        // Reverse name for "Last, First" format
+        const nameParts = selectedEmp.name.split(' ');
+        const formalName = nameParts.length > 1 ? `${nameParts[nameParts.length-1]}, ${nameParts[0]}` : selectedEmp.name;
+
+        const header = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Notice of Discipline</title><style>
+            body { font-family: 'Arial', sans-serif; font-size: 11pt; line-height: 1.2; }
+            p { margin-top: 5px; margin-bottom: 5px; }
+            .header { text-align: center; font-weight: bold; margin-bottom: 20px; text-transform: uppercase; }
+            .right-align { text-align: right; }
             .bold { font-weight: bold; }
+            .indent { margin-left: 20px; }
+            .schedule { margin-left: 40px; font-family: 'Courier New', monospace; font-size: 10pt; }
+            .red-text { color: red; } 
         </style></head><body>`;
         
         const content = `
-            <p style="text-align:right; font-size:10pt;">Curi 20 E</p>
+            <p class="right-align" style="font-size:10pt;">Curi 20 E</p>
+            <br>
+            <p>TO: <strong>${formalName}</strong></p>
             <div class="header">
                 <p>MARTA ATTENDANCE PROGRAM<br>NOTICE OF DISCIPLINE</p>
             </div>
-            <p><strong>TO:</strong> ${selectedEmp.name} <span style="float:right;"><strong>DATE:</strong> ${new Date().toLocaleDateString()}</span></p>
-            
-            <p class="section">MARTA's Attendance Program states that an employee who accumulates excessive occurrences of absence within any twelve month period (rolling year) will be disciplined according to the following:</p>
-            
-            <table>
-                <tr><th width="40%">Number of Occurrences</th><th width="60%">Level of Discipline</th></tr>
-                <tr><td>1-2</td><td>None</td></tr>
-                <tr><td>3</td><td>Verbal Warning</td></tr>
-                <tr><td>4</td><td>Written Warning</td></tr>
-                <tr><td>5</td><td>Final Written Warning</td></tr>
-                <tr><td>6+</td><td>Discharge</td></tr>
-            </table>
-
-            <p class="section">My records indicate that you have accumulated <strong>${activePoints} occurrences</strong> during the past rolling twelve months. The Occurrences are as follows:</p>
-
-            <table style="width:60%; margin:auto;">
-                <tr><th>Count</th><th>Date / Type</th></tr>
-                ${incidentRows}
-            </table>
-
-            <p class="section">Therefore, in accordance with the schedule of progressive discipline, this is your <strong>${disciplineLevel}</strong> for excessive absenteeism under the rule.</p>
-
-            <p class="section">Please be advised that your rate of absenteeism is not acceptable and YOUR corrective action is required. Additional occurrences will result in the progressive disciplinary action indicated above.</p>
-
-            <p class="section">If you have a personal problem that is affecting your attendance, it is recommended that you call Humana, MARTA's Employee Assistance Program (EAP), at 1-800-448-4358. MARTA sincerely hopes that you will improve your attendance and that further discipline will not be necessary.</p>
-
-            <div class="header" style="margin-top:30px; border-top: 1px solid #000; padding-top:10px;">ACKNOWLEDGEMENT</div>
+            <p class="right-align">DATE: <strong>${new Date().toLocaleDateString()}</strong></p>
+            <br>
+            <p>MARTA's Attendance Program states that an employee who accumulates excessive occurrences of absence within any twelve month period (rolling year) will be disciplined according to the following:</p>
+            <br>
+            <p class="schedule">Number of Occurrences&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Level of Discipline</p>
+            <p class="schedule">1-2&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;None</p>
+            <p class="schedule">3&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Verbal Warning</p>
+            <p class="schedule">4&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Written Warning</p>
+            <p class="schedule">5&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;* Final Written Warning Discharge</p>
+            <br>
+            <p>My records indicate that you have accumulated <strong>${activePoints} occurrences</strong> during the past rolling twelve months. The Occurrences are as follows:</p>
+            <br>
+            <p style="margin-left: 40px; font-weight:bold;">Occurrences</p>
+            ${incidentListHTML || '<p style="margin-left: 40px;">None recorded.</p>'}
+            <br>
+            <p>Therefore, in accordance with the schedule of progressive discipline, this is your <strong>${disciplineLevel}</strong> for excessive absenteeism under the rule.</p>
+            <br>
+            <p>Please be advised that your rate of absenteeism is not acceptable and YOUR corrective action is required. Additional occurrences will result in the progressive disciplinary action indicated above.</p>
+            <br>
+            <p>If you have a personal problem that is affecting your attendance, it is recommended that you call Humana, MARTA's Employee Assistance Program (EAP), at 1-800-448-4358. MARTA sincerely hopes that you will improve your attendance and that further discipline will not be necessary.</p>
+            <br><br>
+            <p class="header" style="border-top: 1px solid #000; padding-top: 5px; width: 200px; margin: auto;">ACKNOWLEDGEMENT</p>
             <p>I acknowledge receipt of this Notice of Discipline and that I have been informed of the help available to me through MARTA's EAP and of potential for progressive discipline, up to and including discharge.</p>
-
-            <table style="border:none; margin-top:40px;">
-                <tr style="border:none;">
-                    <td style="border:none; border-bottom:1px solid #000; text-align:left; width:40%;">&nbsp;</td>
-                    <td style="border:none; width:10%;"></td>
-                    <td style="border:none; border-bottom:1px solid #000; text-align:left; width:50%;">&nbsp;</td>
-                </tr>
-                <tr style="border:none;">
-                    <td style="border:none; text-align:left;">Date</td>
-                    <td style="border:none;"></td>
-                    <td style="border:none; text-align:left;">Employee</td>
-                </tr>
-            </table>
-            
-            <table style="border:none; margin-top:40px;">
-                <tr style="border:none;">
-                    <td style="border:none; border-bottom:1px solid #000; text-align:left; width:40%;">&nbsp;</td>
-                    <td style="border:none; width:10%;"></td>
-                    <td style="border:none; border-bottom:1px solid #000; text-align:left; width:50%;">&nbsp;</td>
-                </tr>
-                <tr style="border:none;">
-                    <td style="border:none; text-align:left;">Date</td>
-                    <td style="border:none;"></td>
-                    <td style="border:none; text-align:left;">Foreman/Supervisor/Superintendent</td>
-                </tr>
-            </table>
+            <br><br><br>
+            <p>__________________________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; __________________________</p>
+            <p>Date &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Employee</p>
+            <br>
+            <p>__________________________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; __________________________</p>
+            <p>Date &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Foreman/Supervisor/Superintendent</p>
+            <br>
+            <p>__________________________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; __________________________</p>
+            <p>Date &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; General Foreman/Manager/General Superintendent</p>
         </body></html>`;
 
         const blob = new Blob(['\ufeff', header + content], { type: 'application/msword' });
-        saveAs(blob, `${selectedEmp.name.replace(' ','_')}_Discipline_Notice.doc`);
+        saveAs(blob, `${selectedEmp.name.replace(' ','_')}_Notice.doc`);
         showToast("Notice Generated", 'success');
     };
 
@@ -333,7 +319,7 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                             </div>
                             <div className="overflow-y-auto flex-grow">
                                 <table className="w-full text-left text-xs">
-                                    <thead className="text-slate-400 font-black uppercase bg-white border-b sticky top-0"><tr><th className="p-3">Employee Name</th><th className="p-3 text-right">Count</th></tr></thead>
+                                    <thead className="text-slate-400 font-black uppercase bg-white border-b sticky top-0"><tr><th className="p-3">Employee Name</th><th className="p-3 text-right">Occurrences</th></tr></thead>
                                     <tbody className="divide-y divide-slate-50">
                                         {filteredRoster.map(emp => (
                                             <tr key={emp.id} onClick={() => setSelectedEmp(emp)} className="hover:bg-blue-50 transition-colors cursor-pointer">
