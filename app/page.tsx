@@ -25,7 +25,7 @@ const BusTracker = dynamic(() => import('./BusTracker'), {
 // --- COMPONENT: TOAST NOTIFICATION ---
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
     useEffect(() => {
-        const timer = setTimeout(onClose, 2000);
+        const timer = setTimeout(onClose, 3000);
         return () => clearTimeout(timer);
     }, [onClose]);
 
@@ -86,61 +86,12 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
     // Incident Form
     const [incData, setIncData] = useState({ type: 'Sick', date: '', count: 1, docReceived: false, notes: '' });
 
-    // --- BULK STAFF LIST ---
-    const staffList = [
-        "Sean Foxx", "Aneto Westfield", "Timothy Johnson", "Kenneth Smith", "Adriel Reece", "Morris Lewis", 
-        "Xavier Summers", "Toni Murray", "Charles Brown", "Ronald White", "Dequan Wilson", "David Hutcheson", 
-        "Pedro Chenault", "Lech Slomiany", "Willie Smith", "Keith Evans", "Robert Pritchett", "Bryan Parks", 
-        "Haley Hernandez", "Emmett Ingram", "Carey Cooper", "Calvin Smith", "Maurice Cousar", "Yalik Roulhac", 
-        "Lawrence McCrary", "Pharyle Boddie", "Clarence Patterson", "David Dominguez", "Edward Gist", 
-        "Theophilus Stegall", "Darell Denny", "Brian Coldmon", "Kenneth Payne", "Ja'Corey Owensby", 
-        "Stevie Manuel", "Llave Gomez", "Joshua Hammond", "Antonio Poole", "William McKinney", "Stephen Daniel", 
-        "Jalil Gloster", "David Jackson", "Timothy Barnes", "Darrin Clinton", "Joaquin Dominguez", "David Swanson", 
-        "Brian Jackson", "Terry Ringstaff", "Calvin Tucker", "Roderick Thomas", "Timothy Patrick", "Brandon Thomas", 
-        "Oumeshwar Pooran", "Peter Cook", "Lamar Carter", "Juan Ortiz", "Donald McMullen", "Cordarius Cousins", 
-        "Jonathan Foster", "Kenneth Cothran", "Kevin Sailsman", "Jeffrey Campbell", "Ronnie Payne", "Sabrina Glass-Ford", 
-        "Rico Hill", "Mpoyi Kim", "Evenmore Bota", "Edward Bryan", "Felix Rice", "Bryant Calliste", "Andrew Lewis", 
-        "Edward Singleton", "Terry Lee", "Zonka Lamar", "George Austin", "Jason Collins", "Aime Akoussan", 
-        "Patrick Kitchens", "Matthew Perry", "Derrick Taylor", "Xamari McGhee", "Julian Freckleton", 
-        "Christopher Baskerville", "Yeudiel Ortiz Vargas", "Booz Dominguez", "Kenneth Marte", "Thomas Fordyce", 
-        "Orlando Ortiz Vargas", "Brian Morton", "Felicia Walker", "Debraca Tenny", "Peter Hosking", "Kaneshia Fowler", 
-        "Patricia Brown", "Darrell Owens", "Michael Braxton", "Larry Babb", "Felecia Harber", "Latoya Green", 
-        "Kerry Mitchell", "Ekoue Akpah", "Otis Brinson", "Shelby Roussaw", "Jason Pope", "Lillie Green", 
-        "Beverly Foster", "Tammi Peavy", "Immacula Point-Du-Jour", "Letosha Rowden", "Alethia Woods", 
-        "Linwood Harrell", "Michelle Gibson", "Dafford Madison", "Alancondro Henderson", "Luis Munoz", 
-        "Derek Collier", "Phillip Lee", "Mark Scott"
-    ];
-
-    const handleBulkImport = async () => {
-        if(!confirm(`This will add ${staffList.length} employees to the database. Continue?`)) return;
-        
-        const uniqueNames = [...new Set(staffList)];
-        const batch = writeBatch(db);
-
-        uniqueNames.forEach(name => {
-            const newRef = doc(collection(db, "personnel"));
-            batch.set(newRef, {
-                name: name,
-                totalOccurrences: 0,
-                incidents: [],
-                timestamp: serverTimestamp()
-            });
-        });
-
-        try {
-            await batch.commit();
-            showToast(`Successfully added ${uniqueNames.length} employees!`, 'success');
-        } catch (err) {
-            console.error(err);
-            showToast("Import failed. Check console.", 'error');
-        }
-    };
-
     useEffect(() => {
         const q = query(collection(db, "personnel"), orderBy("name"));
         return onSnapshot(q, (snap) => setPersonnel(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
     }, []);
 
+    // Helper: Flatten all incidents for the "Log" view
     const allIncidents = useMemo(() => {
         let logs: any[] = [];
         personnel.forEach(p => {
@@ -150,22 +101,39 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                 });
             }
         });
+        // Sort by date descending
         return logs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     }, [personnel]);
 
+    // Helper: Calculate Dashboard Stats & Monthly Breakdown
     const stats = useMemo(() => {
         const typeCounts: {[key: string]: number} = {};
+        const monthlyCounts: {[key: string]: {[key: string]: number}} = {}; // { "January": { "Sick": 5, "FMLA": 2 } }
         let totalOccurrences = 0;
         
+        const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
         allIncidents.forEach(inc => {
             const c = parseInt(inc.count) || 1;
             totalOccurrences += c;
+            
+            // Type Counts
             typeCounts[inc.type] = (typeCounts[inc.type] || 0) + c;
+
+            // Monthly Breakdown
+            if (inc.date) {
+                const dateObj = new Date(inc.date);
+                const month = monthNames[dateObj.getMonth()];
+                if (!monthlyCounts[month]) monthlyCounts[month] = { Total: 0 };
+                
+                monthlyCounts[month][inc.type] = (monthlyCounts[month][inc.type] || 0) + c;
+                monthlyCounts[month].Total += c;
+            }
         });
 
         const topOffenders = [...personnel].sort((a,b) => (b.totalOccurrences || 0) - (a.totalOccurrences || 0)).slice(0, 10);
 
-        return { totalOccurrences, typeCounts, topOffenders };
+        return { totalOccurrences, typeCounts, topOffenders, monthlyCounts, monthNames };
     }, [allIncidents, personnel]);
 
     const handleAddEmployee = async (e: React.FormEvent) => {
@@ -218,9 +186,6 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                         <button onClick={()=>setViewMode('dashboard')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded transition-all ${viewMode==='dashboard'?'bg-[#002d72] text-white shadow':'text-slate-400 hover:text-[#002d72]'}`}>Dashboard</button>
                         <button onClick={()=>setViewMode('log')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded transition-all ${viewMode==='log'?'bg-[#002d72] text-white shadow':'text-slate-400 hover:text-[#002d72]'}`}>Master Log</button>
                     </div>
-                    {/* BULK UPLOAD BUTTON */}
-                    <button onClick={handleBulkImport} className="px-4 py-2 bg-purple-600 text-white rounded-lg font-black uppercase text-[10px] shadow-lg hover:bg-purple-700 transition-all">⚠️ Import Staff List</button>
-                    
                     <button onClick={() => setShowIncidentModal(true)} className="px-6 py-2 bg-[#ef7c00] text-white rounded-lg font-black uppercase text-[10px] shadow-lg hover:bg-orange-600 transition-all">+ Log Incident</button>
                     <button onClick={() => setShowAddModal(true)} className="px-4 py-2 bg-slate-200 text-slate-600 rounded-lg font-black uppercase text-[10px] hover:bg-slate-300 transition-all">+ Emp</button>
                 </div>
@@ -229,6 +194,7 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
             {/* DASHBOARD VIEW */}
             {viewMode === 'dashboard' && (
                 <div className="space-y-6 overflow-y-auto pb-10">
+                    {/* TOP STATS */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Occurrences</p>
@@ -249,23 +215,43 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* MONTHLY BREAKDOWN TABLE (New Feature matching CSV) */}
                         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                            <div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Incidents by Type</h3></div>
+                            <div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Monthly Incident Summary</h3></div>
                             <table className="w-full text-left text-xs">
-                                <thead className="text-slate-400 font-black uppercase bg-white border-b"><tr><th className="p-3">Type</th><th className="p-3 text-right">Total</th></tr></thead>
+                                <thead className="text-slate-400 font-black uppercase bg-white border-b">
+                                    <tr>
+                                        <th className="p-3">Month</th>
+                                        <th className="p-3 text-right">Sick</th>
+                                        <th className="p-3 text-right">FMLA</th>
+                                        <th className="p-3 text-right">No Show</th>
+                                        <th className="p-3 text-right">Total</th>
+                                    </tr>
+                                </thead>
                                 <tbody className="divide-y divide-slate-50">
-                                    {Object.entries(stats.typeCounts).map(([type, count]) => (
-                                        <tr key={type}><td className="p-3 font-bold text-slate-700">{type}</td><td className="p-3 text-right font-mono font-bold">{count}</td></tr>
-                                    ))}
-                                    {Object.keys(stats.typeCounts).length === 0 && <tr><td colSpan={2} className="p-4 text-center text-slate-300 italic">No data yet.</td></tr>}
+                                    {stats.monthNames.map(month => {
+                                        const data = stats.monthlyCounts[month] || {};
+                                        if (!data.Total) return null; // Skip empty months
+                                        return (
+                                            <tr key={month}>
+                                                <td className="p-3 font-bold text-slate-700">{month}</td>
+                                                <td className="p-3 text-right font-mono text-orange-600">{data['Sick'] || 0}</td>
+                                                <td className="p-3 text-right font-mono text-blue-600">{data['FMLA'] || 0}</td>
+                                                <td className="p-3 text-right font-mono text-red-600">{(data['No Call/No Show'] || 0) + (data['Failure to Report'] || 0)}</td>
+                                                <td className="p-3 text-right font-black">{data.Total || 0}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {Object.keys(stats.monthlyCounts).length === 0 && <tr><td colSpan={5} className="p-4 text-center text-slate-300 italic">No data recorded yet.</td></tr>}
                                 </tbody>
                             </table>
                         </div>
 
+                        {/* TOP OFFENDERS */}
                         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                            <div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Top Offenders (By Occurrences)</h3></div>
+                            <div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Employees by Total Incidents</h3></div>
                             <table className="w-full text-left text-xs">
-                                <thead className="text-slate-400 font-black uppercase bg-white border-b"><tr><th className="p-3">Employee Name</th><th className="p-3 text-right">Count</th></tr></thead>
+                                <thead className="text-slate-400 font-black uppercase bg-white border-b"><tr><th className="p-3">Employee Name</th><th className="p-3 text-right">Occurrences</th></tr></thead>
                                 <tbody className="divide-y divide-slate-50">
                                     {stats.topOffenders.map(emp => (
                                         <tr key={emp.id} className="hover:bg-red-50 transition-colors">
@@ -280,7 +266,7 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                 </div>
             )}
 
-            {/* LOG VIEW */}
+            {/* LOG VIEW (ATTENDANCE SHEET STYLE) */}
             {viewMode === 'log' && (
                 <div className="bg-white rounded-2xl shadow-lg border border-slate-200 flex-grow overflow-hidden flex flex-col">
                     <div className="bg-slate-50 border-b p-3 grid grid-cols-12 gap-2 text-[9px] font-black uppercase text-slate-400 tracking-widest">
@@ -306,7 +292,7 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                 </div>
             )}
 
-            {/* ADD STAFF MODAL */}
+            {/* MODALS */}
             {showAddModal && (
                 <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
                     <div className="bg-white p-6 rounded-2xl w-full max-w-sm">
@@ -317,7 +303,6 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                 </div>
             )}
 
-            {/* LOG INCIDENT MODAL */}
             {showIncidentModal && (
                 <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
                     <div className="bg-white p-8 rounded-2xl w-full max-w-md shadow-2xl">
@@ -546,7 +531,7 @@ const AnalyticsDashboard = ({ buses, showToast }: { buses: any[], showToast: (ms
     }, [buses]);
 
     const handleResetMetrics = async () => {
-        if(!confirm("⚠️ WARNING: This will WIPE ALL HISTORY logs for the entire fleet.\n\n• 'Shop Buses' counts will reset to 0.\n• '7-Day Trend' will flatten.\n• Shift Handover reports will be cleared.\n\nAre you sure you want to delete all historical data?")) return;
+        if(!confirm("⚠️ WARNING: This will WIPE ALL HISTORY logs for the entire fleet.")) return;
         setIsResetting(true);
         try {
             let deletedCount = 0;
@@ -790,10 +775,15 @@ export default function FleetManager() {
   const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
 
   const holdStatuses = ['On Hold', 'Engine', 'Body Shop', 'Vendor', 'Brakes', 'Safety'];
+  
+  // ADMIN CHECK: Add your emails here
+  const isAdmin = user && (
+      user.email === 'anetowestfield@gmail.com' || 
+      user.email === 'supervisor@fleet.com' ||
+      user.email === 'admin@admin.com'
+  );
 
-  const triggerToast = (msg: string, type: 'success' | 'error') => {
-      setToast({ msg, type });
-  };
+  const triggerToast = (msg: string, type: 'success' | 'error') => { setToast({ msg, type }); };
 
   useEffect(() => { onAuthStateChanged(auth, u => setUser(u)); }, []);
   useEffect(() => { if (!user) return; return onSnapshot(query(collection(db, "buses"), orderBy("number", "asc")), s => setBuses(s.docs.map(d => ({...d.data(), docId: d.id})))); }, [user]);
@@ -838,16 +828,12 @@ export default function FleetManager() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-[#ef7c00] selection:text-white">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
-      {selectedBusDetail && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <BusDetailView bus={selectedBusDetail} onClose={() => setSelectedBusDetail(null)} showToast={triggerToast} />
-        </div>
-      )}
+      {selectedBusDetail && (<div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"><BusDetailView bus={selectedBusDetail} onClose={() => setSelectedBusDetail(null)} showToast={triggerToast} /></div>)}
 
       <nav className="bg-white/90 backdrop-blur-md border-b border-slate-200 sticky top-0 z-[1001] px-6 py-4 flex justify-between items-center shadow-sm">
         <div className="flex items-center gap-2"><div className="w-2 h-6 bg-[#002d72] rounded-full"></div><span className="font-black text-lg italic uppercase tracking-tighter text-[#002d72]">Fleet Manager</span></div>
         <div className="flex gap-4 items-center">
-          {['inventory', 'input', 'tracker', 'analytics', 'handover', 'parts', 'personnel'].map(v => (
+          {['inventory', 'input', 'tracker', 'handover', 'parts'].concat(isAdmin ? ['analytics', 'personnel'] : []).map(v => (
             <button key={v} onClick={() => setView(v as any)} className={`text-[9px] font-black uppercase tracking-widest border-b-2 pb-1 transition-all ${view === v ? 'border-[#ef7c00] text-[#002d72]' : 'border-transparent text-slate-400 hover:text-[#002d72]'}`}>{v.replace('input', 'Data Entry').replace('parts', 'Parts List').replace('personnel', 'Personnel')}</button>
           ))}
           <button onClick={exportExcel} className="text-[#002d72] text-[10px] font-black uppercase hover:text-[#ef7c00]">Excel</button>
@@ -857,58 +843,16 @@ export default function FleetManager() {
 
       <main className="max-w-[1600px] mx-auto p-6">
         {view === 'tracker' ? <div className="h-[85vh] bg-white rounded-2xl shadow-sm border overflow-hidden relative"><BusTracker /></div> :
-         view === 'input' ? <BusInputForm showToast={(m, t) => setToast({msg:m, type:t})} /> :
-         view === 'analytics' ? <div className="animate-in fade-in duration-500"><StatusCharts buses={buses} /><AnalyticsDashboard buses={buses} showToast={(m, t) => setToast({msg:m, type:t})} /></div> :
-         view === 'handover' ? <ShiftHandover buses={buses} showToast={(m, t) => setToast({msg:m, type:t})} /> :
+         view === 'input' ? <BusInputForm showToast={triggerToast} /> :
+         view === 'analytics' ? (isAdmin ? <div className="animate-in fade-in duration-500"><StatusCharts buses={buses} /><AnalyticsDashboard buses={buses} showToast={triggerToast} /></div> : <div className="p-20 text-center text-red-500 font-black">ACCESS DENIED</div>) :
+         view === 'handover' ? <ShiftHandover buses={buses} showToast={triggerToast} /> :
          view === 'parts' ? <PartsInventory showToast={triggerToast} /> :
-         view === 'personnel' ? <PersonnelManager showToast={triggerToast} /> : (
+         view === 'personnel' ? (isAdmin ? <PersonnelManager showToast={triggerToast} /> : <div className="p-20 text-center text-red-500 font-black">ACCESS DENIED</div>) : (
           <>
-            <div className="grid grid-cols-4 gap-4 mb-8">
-              {[{label:'Total Fleet',val:buses.length,c:'text-slate-900'},{label:'Ready',val:buses.filter(b=>b.status==='Active'||b.status==='In Shop').length,c:'text-green-600'},{label:'On Hold',val:buses.filter(b=>holdStatuses.includes(b.status)).length,c:'text-red-600'},{label:'In Shop',val:buses.filter(b=>b.status==='In Shop').length,c:'text-[#ef7c00]'}].map(m=>(
-                <div key={m.label} onClick={()=>setActiveFilter(m.label)} className={`bg-white p-5 rounded-2xl shadow-sm border flex flex-col items-center cursor-pointer transition-all hover:scale-105 ${activeFilter===m.label?'border-[#002d72] bg-blue-50':'border-slate-100'}`}><p className="text-[8px] font-black uppercase text-slate-400 mb-1 tracking-widest">{m.label}</p><p className={`text-2xl font-black ${m.c}`}>{m.val}</p></div>
-              ))}
-            </div>
-
-            <div className="mb-6 flex justify-between items-end gap-4">
-                <input type="text" placeholder="Search Unit #..." className="w-full max-w-md pl-4 pr-10 py-3 bg-white border border-slate-200 rounded-lg text-sm font-bold focus:border-[#002d72] outline-none shadow-sm" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
-                <div className="bg-white border rounded-lg p-1 flex">
-                    <button onClick={()=>setInventoryMode('list')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded ${inventoryMode==='list'?'bg-[#002d72] text-white shadow-md':'text-slate-400'}`}>List</button>
-                    <button onClick={()=>setInventoryMode('grid')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded ${inventoryMode==='grid'?'bg-[#002d72] text-white shadow-md':'text-slate-400'}`}>Grid</button>
-                </div>
-            </div>
-
+            <div className="grid grid-cols-4 gap-4 mb-8">{[{label:'Total Fleet',val:buses.length,c:'text-slate-900'},{label:'Ready',val:buses.filter(b=>b.status==='Active'||b.status==='In Shop').length,c:'text-green-600'},{label:'On Hold',val:buses.filter(b=>holdStatuses.includes(b.status)).length,c:'text-red-600'},{label:'In Shop',val:buses.filter(b=>b.status==='In Shop').length,c:'text-[#ef7c00]'}].map(m=>(<div key={m.label} onClick={()=>setActiveFilter(m.label)} className={`bg-white p-5 rounded-2xl shadow-sm border flex flex-col items-center cursor-pointer transition-all hover:scale-105 ${activeFilter===m.label?'border-[#002d72] bg-blue-50':'border-slate-100'}`}><p className="text-[8px] font-black uppercase text-slate-400 mb-1 tracking-widest">{m.label}</p><p className={`text-2xl font-black ${m.c}`}>{m.val}</p></div>))}</div>
+            <div className="mb-6 flex justify-between items-end gap-4"><input type="text" placeholder="Search Unit #..." className="w-full max-w-md pl-4 pr-10 py-3 bg-white border border-slate-200 rounded-lg text-sm font-bold focus:border-[#002d72] outline-none shadow-sm" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} /><div className="bg-white border rounded-lg p-1 flex"><button onClick={()=>setInventoryMode('list')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded ${inventoryMode==='list'?'bg-[#002d72] text-white shadow-md':'text-slate-400'}`}>List</button><button onClick={()=>setInventoryMode('grid')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded ${inventoryMode==='grid'?'bg-[#002d72] text-white shadow-md':'text-slate-400'}`}>Grid</button></div></div>
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden min-h-[500px]">
-                {inventoryMode === 'list' ? (
-                    <>
-                        <div className="grid grid-cols-10 gap-4 p-5 border-b bg-slate-50/50 text-[9px] font-black uppercase text-slate-400 tracking-widest">
-                            <div onClick={()=>requestSort('number')} className="cursor-pointer hover:text-[#002d72]">Unit #</div>
-                            <div>Series</div><div>Status</div><div>Location</div><div className="col-span-2">Fault Preview</div><div>Exp Return</div><div>Act Return</div><div>Days OOS</div>
-                        </div>
-                        <div className="divide-y divide-slate-100">
-                            {sortedBuses.map(b => (
-                                <div key={b.docId} onClick={()=>setSelectedBusDetail(b)} className={`grid grid-cols-10 gap-4 p-5 items-center cursor-pointer hover:bg-slate-50 transition-all border-l-4 ${b.status==='Active'?'border-green-500':'border-red-500'}`}>
-                                    <div className="text-lg font-black text-[#002d72]">#{b.number}</div>
-                                    <div className="text-[9px] font-bold text-slate-400">{getBusSpecs(b.number).length}</div>
-                                    <div className={`text-[9px] font-black uppercase px-2 py-1 rounded-full w-fit ${b.status==='Active'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{b.status}</div>
-                                    <div className="text-xs font-bold text-slate-600">{b.location||'—'}</div>
-                                    <div className="col-span-2 text-xs font-bold text-slate-500 truncate italic">{b.notes||'No faults.'}</div>
-                                    <div className="text-xs font-bold text-slate-700">{b.expectedReturnDate||'—'}</div>
-                                    <div className="text-xs font-bold text-slate-700">{b.actualReturnDate||'—'}</div>
-                                    <div className="text-xs font-black text-red-600">{b.status!=='Active' ? `${calculateDaysOOS(b.oosStartDate)} days` : '—'}</div>
-                                </div>
-                            ))}
-                        </div>
-                    </>
-                ) : (
-                    <div className="p-8 grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-3">
-                        {sortedBuses.map(b => (
-                            <div key={b.docId} onClick={()=>setSelectedBusDetail(b)} className={`h-14 rounded-lg border-2 flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-110 shadow-sm ${b.status==='Active'?'bg-green-50 border-green-200 text-green-800':'bg-red-50 border-red-200 text-red-800'}`}>
-                                <span className="text-xs font-black italic">#{b.number}</span>
-                                {b.status!=='Active'&&<span className="text-[7px] font-bold uppercase opacity-60 leading-none">{b.status}</span>}
-                            </div>
-                        ))}
-                    </div>
-                )}
+                {inventoryMode === 'list' ? (<><div className="grid grid-cols-10 gap-4 p-5 border-b bg-slate-50/50 text-[9px] font-black uppercase text-slate-400 tracking-widest"><div onClick={()=>requestSort('number')} className="cursor-pointer hover:text-[#002d72]">Unit #</div><div>Series</div><div>Status</div><div>Location</div><div className="col-span-2">Fault Preview</div><div>Exp Return</div><div>Act Return</div><div>Days OOS</div></div><div className="divide-y divide-slate-100">{sortedBuses.map(b => (<div key={b.docId} onClick={()=>setSelectedBusDetail(b)} className={`grid grid-cols-10 gap-4 p-5 items-center cursor-pointer hover:bg-slate-50 transition-all border-l-4 ${b.status==='Active'?'border-green-500':'border-red-500'}`}><div className="text-lg font-black text-[#002d72]">#{b.number}</div><div className="text-[9px] font-bold text-slate-400">{getBusSpecs(b.number).length}</div><div className={`text-[9px] font-black uppercase px-2 py-1 rounded-full w-fit ${b.status==='Active'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{b.status}</div><div className="text-xs font-bold text-slate-600">{b.location||'—'}</div><div className="col-span-2 text-xs font-bold text-slate-500 truncate italic">{b.notes||'No faults.'}</div><div className="text-xs font-bold text-slate-700">{b.expectedReturnDate||'—'}</div><div className="text-xs font-bold text-slate-700">{b.actualReturnDate||'—'}</div><div className="text-xs font-black text-red-600">{b.status!=='Active' ? `${calculateDaysOOS(b.oosStartDate)} days` : '—'}</div></div>))}</div></>) : (<div className="p-8 grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-3">{sortedBuses.map(b => (<div key={b.docId} onClick={()=>setSelectedBusDetail(b)} className={`h-14 rounded-lg border-2 flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-110 shadow-sm ${b.status==='Active'?'bg-green-50 border-green-200 text-green-800':'bg-red-50 border-red-200 text-red-800'}`}><span className="text-xs font-black italic">#{b.number}</span>{b.status!=='Active'&&<span className="text-[7px] font-bold uppercase opacity-60 leading-none">{b.status}</span>}</div>))}</div>)}
             </div>
           </>
         )}
