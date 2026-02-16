@@ -62,25 +62,21 @@ const calculateDaysOOS = (start: string) => {
     return Math.max(0, Math.ceil((now.getTime() - s.getTime()) / (1000 * 3600 * 24)));
 };
 
-// --- MODULE 1: PERSONNEL MANAGER (Interactive Dashboard) ---
+// --- MODULE 1: PERSONNEL MANAGER (With Word Export) ---
 const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'success'|'error') => void }) => {
     const [personnel, setPersonnel] = useState<any[]>([]);
     const [viewMode, setViewMode] = useState<'dashboard' | 'log'>('dashboard');
     const [showAddModal, setShowAddModal] = useState(false);
     const [showIncidentModal, setShowIncidentModal] = useState(false);
-    const [selectedEmpId, setSelectedEmpId] = useState('');
+    const [selectedEmp, setSelectedEmp] = useState<any>(null);
     const [newEmpName, setNewEmpName] = useState('');
     const [incData, setIncData] = useState({ type: 'Sick', date: '', count: 1, docReceived: false, supervisorReviewDate: '', notes: '' });
-    
-    // Filters for Master Log
-    const [logFilter, setLogFilter] = useState({ search: '', type: 'All', sort: 'desc' });
 
     useEffect(() => {
         const q = query(collection(db, "personnel"), orderBy("name"));
         return onSnapshot(q, (snap) => setPersonnel(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
     }, []);
 
-    // Flatten all incidents
     const allIncidents = useMemo(() => {
         let logs: any[] = [];
         personnel.forEach(p => {
@@ -90,10 +86,9 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                 });
             }
         });
-        return logs;
+        return logs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     }, [personnel]);
 
-    // Dashboard Stats
     const stats = useMemo(() => {
         const typeCounts: {[key: string]: number} = {};
         const monthlyCounts: {[key: string]: {[key: string]: number}} = {};
@@ -104,7 +99,6 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
             const c = parseInt(inc.count) || 1;
             totalOccurrences += c;
             typeCounts[inc.type] = (typeCounts[inc.type] || 0) + c;
-
             if (inc.date) {
                 const dateObj = new Date(inc.date);
                 const month = monthNames[dateObj.getMonth()];
@@ -121,61 +115,72 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         return { totalOccurrences, typeCounts, topOffenders, monthlyCounts, monthNames };
     }, [allIncidents, personnel]);
 
-    // Filtered Log for View
-    const filteredLog = useMemo(() => {
-        let logs = [...allIncidents];
-        if (logFilter.search) logs = logs.filter(l => l.employeeName.toLowerCase().includes(logFilter.search.toLowerCase()));
-        if (logFilter.type !== 'All') logs = logs.filter(l => l.type === logFilter.type);
-        return logs.sort((a, b) => logFilter.sort === 'asc' ? new Date(a.date).getTime() - new Date(b.date).getTime() : new Date(b.date).getTime() - new Date(a.date).getTime());
-    }, [allIncidents, logFilter]);
-
     const handleAddEmployee = async (e: React.FormEvent) => {
-        e.preventDefault(); if(!newEmpName) return;
-        try { await addDoc(collection(db, "personnel"), { name: newEmpName, totalOccurrences: 0, incidents: [], timestamp: serverTimestamp() }); showToast(`Added ${newEmpName}`, 'success'); setNewEmpName(''); setShowAddModal(false); } catch(err) { showToast("Failed to add employee", 'error'); }
+        e.preventDefault();
+        if(!newEmpName) return;
+        try {
+            await addDoc(collection(db, "personnel"), { name: newEmpName, totalOccurrences: 0, incidents: [], timestamp: serverTimestamp() });
+            showToast(`Added ${newEmpName}`, 'success'); setNewEmpName(''); setShowAddModal(false);
+        } catch(err) { showToast("Failed to add employee", 'error'); }
     };
 
     const handleLogIncident = async () => {
-        if(!selectedEmpId) return showToast("Select an employee", 'error');
+        if(!selectedEmp) return showToast("Select an employee", 'error');
         try {
-            const empRef = doc(db, "personnel", selectedEmpId);
-            const newLog = { type: incData.type, date: incData.date || new Date().toISOString().split('T')[0], count: Number(incData.count), docReceived: incData.docReceived, supervisorReviewDate: incData.supervisorReviewDate, notes: incData.notes, loggedAt: new Date().toISOString() };
+            const empRef = doc(db, "personnel", selectedEmp.id);
+            const newLog = {
+                type: incData.type, date: incData.date || new Date().toISOString().split('T')[0],
+                count: Number(incData.count), docReceived: incData.docReceived, supervisorReviewDate: incData.supervisorReviewDate, notes: incData.notes, loggedAt: new Date().toISOString()
+            };
             await updateDoc(empRef, { totalOccurrences: increment(Number(incData.count)), incidents: arrayUnion(newLog) });
-            showToast("Incident Saved", 'success'); setShowIncidentModal(false);
-            setIncData({ type: 'Sick', date: '', count: 1, docReceived: false, supervisorReviewDate: '', notes: '' });
+            showToast("Incident Saved", 'success'); setIncData({ type: 'Sick', date: '', count: 1, docReceived: false, supervisorReviewDate: '', notes: '' });
         } catch(err) { showToast("Failed to save", 'error'); }
     };
 
-    const exportPersonnelReport = async () => {
-        const wb = new ExcelJS.Workbook();
-        const ws = wb.addWorksheet('Incident Dashboard');
+    // --- WORD DOCUMENT GENERATOR (Specific to Personnel) ---
+    const handleExportWord = () => {
+        if(!selectedEmp) return;
         
-        // Add Dashboard Stats
-        ws.addRow(["Attendance / Incident Dashboard Summary"]);
-        ws.addRow(["Total Incident Occurrences", stats.totalOccurrences]);
-        ws.addRow(["Unique Employees Listed", personnel.length]);
-        ws.addRow([]);
-        ws.addRow(["Monthly Incident Summary by Type"]);
-        ws.addRow(["Month", "Sick", "FMLA", "Failure to Report", "Total"]);
-        stats.monthNames.forEach(m => {
-            const d = stats.monthlyCounts[m];
-            if(d && d.Total > 0) ws.addRow([m, d.Sick, d.FMLA, d['No Call/No Show'], d.Total]);
+        const oneYearAgo = new Date();
+        oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+        const header = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Export HTML to Word Document with JavaScript</title><style>
+            body { font-family: 'Arial', sans-serif; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th { background-color: #002d72; color: white; padding: 10px; border: 1px solid #000; }
+            td { padding: 8px; border: 1px solid #000; text-align: center; }
+            .notes { text-align: left; }
+            .old-record { color: red; font-weight: bold; }
+        </style></head><body>`;
+        
+        const title = `<h1 style="text-align:center; color:#002d72;">Personnel Incident Record</h1>
+                       <h2 style="text-align:center;">Employee: ${selectedEmp.name}</h2>
+                       <p style="text-align:center;">Generated on: ${new Date().toLocaleDateString()}</p>`;
+
+        let table = `<table><thead><tr><th>Date</th><th>Type</th><th>Occurrences</th><th>Doc Received</th><th>Sup. Review</th><th>Notes</th></tr></thead><tbody>`;
+
+        const sortedIncidents = (selectedEmp.incidents || []).sort((a:any, b:any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        sortedIncidents.forEach((inc: any) => {
+            const incDate = new Date(inc.date);
+            const isOld = incDate < oneYearAgo;
+            const rowClass = isOld ? "class='old-record'" : "";
+            
+            table += `<tr ${rowClass}>
+                <td>${inc.date}</td>
+                <td>${inc.type}</td>
+                <td>${inc.count}</td>
+                <td>${inc.docReceived ? 'Yes' : 'No'}</td>
+                <td>${inc.supervisorReviewDate || '-'}</td>
+                <td class='notes'>${inc.notes || ''}</td>
+            </tr>`;
         });
 
-        // Add Master Log
-        const logSheet = wb.addWorksheet('Master Log');
-        logSheet.columns = [{header:'Employee Name',key:'name'},{header:'Incident Type',key:'type'},{header:'Date',key:'date'},{header:'Count',key:'count'},{header:'Doc Received',key:'doc'},{header:'Review Date',key:'review'},{header:'Notes',key:'notes'}];
-        allIncidents.forEach(l => logSheet.addRow({
-            name: l.employeeName, type: l.type, date: l.date, count: l.count, doc: l.docReceived?'Yes':'No', review: l.supervisorReviewDate, notes: l.notes
-        }));
+        table += `</tbody></table><br/><br/><p><strong>Total Occurrences: ${selectedEmp.totalOccurrences || 0}</strong></p></body></html>`;
 
-        const buf = await wb.xlsx.writeBuffer();
-        saveAs(new Blob([buf]), `Personnel_Report.xlsx`);
-        showToast("Report Exported", 'success');
-    };
-
-    const jumpToLog = (typeFilter: string = 'All') => {
-        setLogFilter(prev => ({ ...prev, type: typeFilter }));
-        setViewMode('log');
+        const blob = new Blob(['\ufeff', header + title + table], { type: 'application/msword' });
+        saveAs(blob, `${selectedEmp.name.replace(' ','_')}_Record.doc`);
+        showToast("Word Document Downloaded", 'success');
     };
 
     return (
@@ -187,40 +192,89 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                         <button onClick={()=>setViewMode('dashboard')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded transition-all ${viewMode==='dashboard'?'bg-[#002d72] text-white shadow':'text-slate-400 hover:text-[#002d72]'}`}>Dashboard</button>
                         <button onClick={()=>setViewMode('log')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded transition-all ${viewMode==='log'?'bg-[#002d72] text-white shadow':'text-slate-400 hover:text-[#002d72]'}`}>Master Log</button>
                     </div>
-                    <button onClick={exportPersonnelReport} className="px-4 py-2 bg-green-600 text-white rounded-lg font-black uppercase text-[10px] shadow-lg hover:bg-green-700 transition-all">Export Report</button>
                     <button onClick={() => setShowIncidentModal(true)} className="px-6 py-2 bg-[#ef7c00] text-white rounded-lg font-black uppercase text-[10px] shadow-lg hover:bg-orange-600 transition-all">+ Log Incident</button>
                     <button onClick={() => setShowAddModal(true)} className="px-4 py-2 bg-slate-200 text-slate-600 rounded-lg font-black uppercase text-[10px] hover:bg-slate-300 transition-all">+ Emp</button>
                 </div>
             </div>
 
+            {/* EMPLOYEE DETAIL POPUP (UPDATED WITH WORD EXPORT) */}
+            {selectedEmp && (
+                <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in zoom-in-95">
+                    <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                        <div className="p-6 border-b bg-slate-50 flex justify-between items-center">
+                            <div>
+                                <h3 className="text-2xl font-black text-[#002d72] uppercase">{selectedEmp.name}</h3>
+                                <p className="text-xs font-bold text-slate-500">Total Occurrences: <span className="text-red-500">{selectedEmp.totalOccurrences || 0}</span></p>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={handleExportWord} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-black text-[10px] uppercase shadow hover:bg-blue-700 transition-colors">Export Word Record</button>
+                                <button onClick={()=>setSelectedEmp(null)} className="text-2xl text-slate-300 hover:text-slate-500">✕</button>
+                            </div>
+                        </div>
+                        
+                        <div className="p-6 overflow-y-auto">
+                            <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 mb-6">
+                                <h4 className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-3">Log New Incident</h4>
+                                <div className="grid grid-cols-2 gap-4 mb-3">
+                                    <select className="p-2 border rounded font-bold text-xs" value={incData.type} onChange={e=>setIncData({...incData, type:e.target.value})}><option>Sick</option><option>FMLA</option><option>Failure to Report</option><option>Late Reporting</option><option>NC/NS</option></select>
+                                    <input type="number" className="p-2 border rounded font-bold text-xs" placeholder="Count" value={incData.count} onChange={e=>setIncData({...incData, count:Number(e.target.value)})} />
+                                </div>
+                                <div className="flex gap-2 mb-3">
+                                    <input type="date" className="p-2 border rounded font-bold text-xs flex-grow" value={incData.date} onChange={e=>setIncData({...incData, date:e.target.value})} />
+                                    <div className={`p-2 border rounded cursor-pointer font-bold text-xs flex items-center gap-2 ${incData.docReceived?'bg-green-100 border-green-200 text-green-700':'bg-white text-slate-400'}`} onClick={()=>setIncData({...incData, docReceived:!incData.docReceived})}><span>Doc?</span>{incData.docReceived && '✓'}</div>
+                                </div>
+                                <input className="w-full p-2 border rounded font-bold text-xs mb-3" placeholder="Notes..." value={incData.notes} onChange={e=>setIncData({...incData, notes:e.target.value})} />
+                                <button onClick={handleLogIncident} className="w-full py-2 bg-[#002d72] text-white rounded font-black text-xs hover:bg-[#ef7c00]">Add Record</button>
+                            </div>
+
+                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Incident History</h4>
+                            <div className="border rounded-xl overflow-hidden">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-slate-50 border-b font-black text-slate-500"><tr><th className="p-3">Date</th><th className="p-3">Type</th><th className="p-3 text-center">Pts</th><th className="p-3">Notes</th></tr></thead>
+                                    <tbody className="divide-y">
+                                        {selectedEmp.incidents && selectedEmp.incidents.length > 0 ? selectedEmp.incidents.slice().reverse().map((inc: any, i: number) => {
+                                            const isOld = (new Date() - new Date(inc.date)) / (1000 * 60 * 60 * 24) > 365;
+                                            return (
+                                                <tr key={i} className={isOld ? "bg-red-50 text-red-600" : ""}>
+                                                    <td className="p-3 font-mono">{inc.date} {isOld && <span className="text-[8px] font-black uppercase ml-1">(Expired)</span>}</td>
+                                                    <td className="p-3 font-bold">{inc.type}</td>
+                                                    <td className="p-3 text-center font-black">{inc.count}</td>
+                                                    <td className="p-3 italic truncate max-w-[150px]">{inc.notes}</td>
+                                                </tr>
+                                            );
+                                        }) : <tr><td colSpan={4} className="p-4 text-center italic text-slate-300">No history found.</td></tr>}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* DASHBOARD VIEW */}
             {viewMode === 'dashboard' && (
                 <div className="space-y-6 overflow-y-auto pb-10">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div onClick={()=>jumpToLog('All')} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 cursor-pointer hover:border-[#002d72] hover:bg-blue-50 transition-all"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Occurrences</p><p className="text-4xl font-black text-[#002d72]">{stats.totalOccurrences}</p></div>
-                        <div onClick={()=>jumpToLog('All')} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 cursor-pointer hover:border-[#002d72] hover:bg-blue-50 transition-all"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Employees Tracked</p><p className="text-4xl font-black text-slate-700">{personnel.length}</p></div>
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Incidents by Type</p><div className="space-y-1">{Object.entries(stats.typeCounts).slice(0,3).map(([k,v]) => (<div key={k} onClick={()=>jumpToLog(k)} className="flex justify-between text-xs font-bold text-slate-600 cursor-pointer hover:text-[#ef7c00]"><span>{k}</span><span>{v}</span></div>))}</div></div>
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Occurrences</p><p className="text-4xl font-black text-[#002d72]">{stats.totalOccurrences}</p></div>
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Employees Tracked</p><p className="text-4xl font-black text-slate-700">{personnel.length}</p></div>
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Incidents by Type</p><div className="space-y-1">{Object.entries(stats.typeCounts).slice(0,3).map(([k,v]) => (<div key={k} className="flex justify-between text-xs font-bold text-slate-600"><span>{k}</span><span>{v}</span></div>))}</div></div>
                     </div>
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Monthly Incident Summary</h3></div><table className="w-full text-left text-xs"><thead className="text-slate-400 font-black uppercase bg-white border-b"><tr><th className="p-3">Month</th><th className="p-3 text-right">Sick</th><th className="p-3 text-right">FMLA</th><th className="p-3 text-right">No Show</th><th className="p-3 text-right">Total</th></tr></thead><tbody className="divide-y divide-slate-50">{stats.monthNames.map(month => { const data = stats.monthlyCounts[month] || {}; if (!data.Total) return null; return (<tr key={month}><td className="p-3 font-bold text-slate-700">{month}</td><td className="p-3 text-right font-mono text-orange-600">{data['Sick'] || 0}</td><td className="p-3 text-right font-mono text-blue-600">{data['FMLA'] || 0}</td><td className="p-3 text-right font-mono text-red-600">{(data['No Call/No Show'] || 0) + (data['Failure to Report'] || 0)}</td><td className="p-3 text-right font-black">{data.Total || 0}</td></tr>); })}</tbody></table></div>
-                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Top Offenders</h3></div><table className="w-full text-left text-xs"><thead className="text-slate-400 font-black uppercase bg-white border-b"><tr><th className="p-3">Employee Name</th><th className="p-3 text-right">Count</th></tr></thead><tbody className="divide-y divide-slate-50">{stats.topOffenders.map(emp => (<tr key={emp.id} className="hover:bg-red-50 transition-colors"><td className="p-3 font-bold text-slate-700">{emp.name}</td><td className={`p-3 text-right font-black ${emp.totalOccurrences > 5 ? 'text-red-500' : 'text-slate-800'}`}>{emp.totalOccurrences}</td></tr>))}</tbody></table></div>
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Top Offenders</h3></div><table className="w-full text-left text-xs"><thead className="text-slate-400 font-black uppercase bg-white border-b"><tr><th className="p-3">Employee Name</th><th className="p-3 text-right">Count</th></tr></thead><tbody className="divide-y divide-slate-50">{stats.topOffenders.map(emp => (<tr key={emp.id} onClick={() => setSelectedEmp(emp)} className="hover:bg-red-50 transition-colors cursor-pointer"><td className="p-3 font-bold text-slate-700">{emp.name}</td><td className={`p-3 text-right font-black ${emp.totalOccurrences > 5 ? 'text-red-500' : 'text-slate-800'}`}>{emp.totalOccurrences}</td></tr>))}</tbody></table></div>
                     </div>
                 </div>
             )}
 
             {viewMode === 'log' && (
                 <div className="bg-white rounded-2xl shadow-lg border border-slate-200 flex-grow overflow-hidden flex flex-col">
-                    <div className="p-4 border-b flex gap-4 bg-slate-50">
-                        <input className="p-2 border rounded font-bold text-xs flex-grow" placeholder="Search Employee..." value={logFilter.search} onChange={e=>setLogFilter({...logFilter, search:e.target.value})} />
-                        <select className="p-2 border rounded font-bold text-xs" value={logFilter.type} onChange={e=>setLogFilter({...logFilter, type:e.target.value})}><option value="All">All Types</option><option>Sick</option><option>FMLA</option><option>No Call/No Show</option></select>
-                        <select className="p-2 border rounded font-bold text-xs" value={logFilter.sort} onChange={e=>setLogFilter({...logFilter, sort:e.target.value})}><option value="desc">Newest First</option><option value="asc">Oldest First</option></select>
-                    </div>
-                    <div className="bg-white border-b p-3 grid grid-cols-12 gap-2 text-[9px] font-black uppercase text-slate-400 tracking-widest"><div className="col-span-3">Employee Name</div><div className="col-span-2">Incident Type</div><div className="col-span-2">Date</div><div className="col-span-1 text-center">Count</div><div className="col-span-1 text-center">Doc?</div><div className="col-span-3">Notes</div></div>
-                    <div className="overflow-y-auto flex-grow divide-y divide-slate-100">{filteredLog.length === 0 ? <div className="p-10 text-center text-slate-300 italic">No attendance records found.</div> : filteredLog.map((log, i) => (<div key={i} className="grid grid-cols-12 gap-2 p-3 items-center hover:bg-blue-50 transition-colors text-xs"><div className="col-span-3 font-bold text-[#002d72]">{log.employeeName}</div><div className="col-span-2 font-medium text-slate-600"><span className={`px-2 py-0.5 rounded text-[10px] uppercase font-black ${log.type==='Sick'?'bg-orange-100 text-orange-700':log.type==='FMLA'?'bg-blue-100 text-blue-700':'bg-red-100 text-red-700'}`}>{log.type}</span></div><div className="col-span-2 font-mono text-slate-500">{log.date}</div><div className="col-span-1 text-center font-black">{log.count}</div><div className="col-span-1 text-center">{log.docReceived ? '✅' : '❌'}</div><div className="col-span-3 text-slate-500 truncate italic">{log.notes || '-'}</div></div>))}</div>
+                    <div className="bg-slate-50 border-b p-3 grid grid-cols-12 gap-2 text-[9px] font-black uppercase text-slate-400 tracking-widest"><div className="col-span-3">Employee Name</div><div className="col-span-2">Incident Type</div><div className="col-span-2">Date</div><div className="col-span-1 text-center">Count</div><div className="col-span-1 text-center">Doc?</div><div className="col-span-3">Notes</div></div>
+                    <div className="overflow-y-auto flex-grow divide-y divide-slate-100">{allIncidents.length === 0 ? <div className="p-10 text-center text-slate-300 italic">No attendance records found.</div> : allIncidents.map((log, i) => (<div key={i} className="grid grid-cols-12 gap-2 p-3 items-center hover:bg-blue-50 transition-colors text-xs"><div className="col-span-3 font-bold text-[#002d72]">{log.employeeName}</div><div className="col-span-2 font-medium text-slate-600"><span className={`px-2 py-0.5 rounded text-[10px] uppercase font-black ${log.type==='Sick'?'bg-orange-100 text-orange-700':log.type==='FMLA'?'bg-blue-100 text-blue-700':'bg-red-100 text-red-700'}`}>{log.type}</span></div><div className="col-span-2 font-mono text-slate-500">{log.date}</div><div className="col-span-1 text-center font-black">{log.count}</div><div className="col-span-1 text-center">{log.docReceived ? '✅' : '❌'}</div><div className="col-span-3 text-slate-500 truncate italic">{log.notes || '-'}</div></div>))}</div>
                 </div>
             )}
 
             {showAddModal && (<div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"><div className="bg-white p-6 rounded-2xl w-full max-w-sm"><h3 className="text-xl font-black text-[#002d72] mb-4">Add Employee</h3><input className="w-full p-3 border rounded mb-4 font-bold" placeholder="Full Name (e.g. John Doe)" value={newEmpName} onChange={e=>setNewEmpName(e.target.value)} /><div className="flex gap-2"><button onClick={()=>setShowAddModal(false)} className="flex-1 py-3 bg-slate-100 rounded font-bold text-xs">Cancel</button><button onClick={handleAddEmployee} className="flex-1 py-3 bg-[#002d72] text-white rounded font-bold text-xs">Add</button></div></div></div>)}
-            {showIncidentModal && (<div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"><div className="bg-white p-8 rounded-2xl w-full max-w-md shadow-2xl"><h3 className="text-2xl font-black text-[#ef7c00] mb-6 uppercase">Log Attendance Incident</h3><label className="text-[10px] font-black text-slate-400 uppercase">Employee</label><select className="w-full p-3 border-2 rounded-lg font-bold mb-4" value={selectedEmpId} onChange={e=>setSelectedEmpId(e.target.value)}><option value="">-- Select Employee --</option>{personnel.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select><div className="grid grid-cols-2 gap-4 mb-4"><div><label className="text-[10px] font-black text-slate-400 uppercase">Type</label><select className="w-full p-3 border-2 rounded-lg font-bold text-sm" value={incData.type} onChange={e=>setIncData({...incData, type:e.target.value})}><option>Sick</option><option>FMLA</option><option>Failure to Report</option><option>Late Reporting</option><option>NC/NS</option></select></div><div><label className="text-[10px] font-black text-slate-400 uppercase">Occurrences</label><input type="number" className="w-full p-3 border-2 rounded-lg font-bold text-sm" value={incData.count} onChange={e=>setIncData({...incData, count:Number(e.target.value)})} /></div></div><div className="grid grid-cols-2 gap-4 mb-4"><div><label className="text-[10px] font-black text-slate-400 uppercase">Incident Date</label><input type="date" className="w-full p-3 border-2 rounded-lg font-bold text-sm" value={incData.date} onChange={e=>setIncData({...incData, date:e.target.value})} /></div><div><label className="text-[10px] font-black text-slate-400 uppercase">Review Date</label><input type="date" className="w-full p-3 border-2 rounded-lg font-bold text-sm" value={incData.supervisorReviewDate} onChange={e=>setIncData({...incData, supervisorReviewDate:e.target.value})} /></div></div><div className="flex items-center gap-3 mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100 cursor-pointer" onClick={()=>setIncData({...incData, docReceived:!incData.docReceived})}><div className={`w-5 h-5 rounded border flex items-center justify-center ${incData.docReceived ? 'bg-blue-500 border-blue-500 text-white' : 'bg-white border-slate-300'}`}>{incData.docReceived && '✓'}</div><span className="text-xs font-bold text-blue-800">Documentation Received?</span></div><textarea className="w-full p-3 border-2 rounded-lg h-24 mb-6 font-medium text-sm" placeholder="Notes / Details..." value={incData.notes} onChange={e=>setIncData({...incData, notes:e.target.value})} /><div className="flex gap-4"><button onClick={()=>setShowIncidentModal(false)} className="w-1/3 py-3 bg-slate-100 rounded-xl font-black uppercase text-xs">Cancel</button><button onClick={handleLogIncident} className="w-2/3 py-3 bg-[#002d72] text-white rounded-xl font-black uppercase text-xs shadow-lg hover:bg-blue-900">Save Record</button></div></div></div>)}
+            {showIncidentModal && (<div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"><div className="bg-white p-8 rounded-2xl w-full max-w-md shadow-2xl"><h3 className="text-2xl font-black text-[#ef7c00] mb-6 uppercase">Log Attendance Incident</h3><label className="text-[10px] font-black text-slate-400 uppercase">Employee</label><select className="w-full p-3 border-2 rounded-lg font-bold mb-4" value={selectedEmpId} onChange={e=>setSelectedEmpId(e.target.value)}><option value="">-- Select Employee --</option>{personnel.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select><div className="grid grid-cols-2 gap-4 mb-4"><div><label className="text-[10px] font-black text-slate-400 uppercase">Type</label><select className="w-full p-3 border-2 rounded-lg font-bold text-sm" value={incData.type} onChange={e=>setIncData({...incData, type:e.target.value})}><option>Sick</option><option>FMLA</option><option>Failure to Report</option><option>Late Reporting</option><option>NC/NS</option></select></div><div><label className="text-[10px] font-black text-slate-400 uppercase">Occurrences</label><input type="number" className="w-full p-3 border-2 rounded-lg font-bold text-sm" value={incData.count} onChange={e=>setIncData({...incData, count:Number(e.target.value)})} /></div></div><label className="text-[10px] font-black text-slate-400 uppercase">Date</label><input type="date" className="w-full p-3 border-2 rounded-lg font-bold mb-4 text-sm" value={incData.date} onChange={e=>setIncData({...incData, date:e.target.value})} /><div className="flex items-center gap-3 mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100 cursor-pointer" onClick={()=>setIncData({...incData, docReceived:!incData.docReceived})}><div className={`w-5 h-5 rounded border flex items-center justify-center ${incData.docReceived ? 'bg-blue-500 border-blue-500 text-white' : 'bg-white border-slate-300'}`}>{incData.docReceived && '✓'}</div><span className="text-xs font-bold text-blue-800">Documentation Received?</span></div><textarea className="w-full p-3 border-2 rounded-lg h-24 mb-6 font-medium text-sm" placeholder="Additional notes..." value={incData.notes} onChange={e=>setIncData({...incData, notes:e.target.value})} /><div className="flex gap-4"><button onClick={()=>setShowIncidentModal(false)} className="w-1/3 py-3 bg-slate-100 rounded-xl font-black uppercase text-xs">Cancel</button><button onClick={handleLogIncident} className="w-2/3 py-3 bg-[#002d72] text-white rounded-xl font-black uppercase text-xs shadow-lg hover:bg-blue-900">Save Record</button></div></div></div>)}
         </div>
     );
 };
@@ -388,7 +442,6 @@ const BusDetailView = ({ bus, onClose, showToast }: { bus: any; onClose: () => v
         catch(err) { showToast("Failed to delete log", 'error'); }
     };
 
-    // --- NEW: RESET BUTTON LOGIC ---
     const handleResetBus = async () => {
         if(!confirm("⚠️ WARNING: This will clear ALL notes, locations, and dates for this bus and set it to 'Active'. Continue?")) return;
         try {
@@ -458,7 +511,11 @@ export default function FleetManager() {
   const holdStatuses = ['On Hold', 'Engine', 'Body Shop', 'Vendor', 'Brakes', 'Safety'];
   
   // ADMIN CHECK
-  const isAdmin = user && (user.email === 'anetowestfield@gmail.com' || user.email === 'supervisor@fleet.com' || user.email === 'admin@admin.com');
+  const isAdmin = user && (
+      user.email === 'anetowestfield@gmail.com' || 
+      user.email === 'supervisor@fleet.com' ||
+      user.email === 'admin@admin.com'
+  );
 
   const triggerToast = (msg: string, type: 'success' | 'error') => { setToast({ msg, type }); };
 
