@@ -62,17 +62,14 @@ const calculateDaysOOS = (start: string) => {
     return Math.max(0, Math.ceil((now.getTime() - s.getTime()) / (1000 * 3600 * 24)));
 };
 
-// --- MODULE 1: PERSONNEL MANAGER (With Letter Export) ---
+// --- MODULE 1: PERSONNEL MANAGER (Mobile Responsive) ---
 const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'success'|'error') => void }) => {
     const [personnel, setPersonnel] = useState<any[]>([]);
     const [viewMode, setViewMode] = useState<'dashboard' | 'log'>('dashboard');
     const [showAddModal, setShowAddModal] = useState(false);
     const [showIncidentModal, setShowIncidentModal] = useState(false);
-    
-    // FIXED: Added selectedEmpId back to state
-    const [selectedEmpId, setSelectedEmpId] = useState(''); // Used for Dropdown
-    const [selectedEmp, setSelectedEmp] = useState<any>(null); // Used for Popup
-    
+    const [selectedEmpId, setSelectedEmpId] = useState('');
+    const [selectedEmp, setSelectedEmp] = useState<any>(null);
     const [newEmpName, setNewEmpName] = useState('');
     const [incData, setIncData] = useState({ type: 'Sick', date: '', count: 1, docReceived: false, supervisorReviewDate: '', notes: '' });
     const [rosterSearch, setRosterSearch] = useState('');
@@ -121,7 +118,6 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         return { totalOccurrences, typeCounts, topOffenders, monthlyCounts, monthNames };
     }, [allIncidents, personnel]);
 
-    // FILTERING LOGIC
     const filteredLog = useMemo(() => {
         let logs = [...allIncidents];
         if (logFilter.search) logs = logs.filter(l => l.employeeName.toLowerCase().includes(logFilter.search.toLowerCase()));
@@ -144,8 +140,6 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         return stats.topOffenders.filter(p => p.name.toLowerCase().includes(rosterSearch.toLowerCase()));
     }, [stats.topOffenders, rosterSearch]);
 
-    // --- ACTIONS ---
-
     const handleAddEmployee = async (e: React.FormEvent) => {
         e.preventDefault();
         if(!newEmpName) return;
@@ -155,12 +149,9 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         } catch(err) { showToast("Failed to add employee", 'error'); }
     };
 
-    // FIXED: Now works for both Popup (selectedEmp) AND Modal (selectedEmpId)
     const handleLogIncident = async () => {
         const targetId = selectedEmp ? selectedEmp.id : selectedEmpId;
-        
         if(!targetId) return showToast("Select an employee", 'error');
-        
         try {
             const empRef = doc(db, "personnel", targetId);
             const newLog = {
@@ -168,8 +159,7 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                 count: Number(incData.count), docReceived: incData.docReceived, supervisorReviewDate: incData.supervisorReviewDate, notes: incData.notes, loggedAt: new Date().toISOString()
             };
             await updateDoc(empRef, { totalOccurrences: increment(Number(incData.count)), incidents: arrayUnion(newLog) });
-            showToast("Incident Saved", 'success'); 
-            setShowIncidentModal(false);
+            showToast("Incident Saved", 'success'); setShowIncidentModal(false);
             setIncData({ type: 'Sick', date: '', count: 1, docReceived: false, supervisorReviewDate: '', notes: '' });
         } catch(err) { showToast("Failed to save", 'error'); }
     };
@@ -189,16 +179,12 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         } catch (err) { console.error(err); showToast("Delete Failed", 'error'); }
     };
 
-    // --- NOTICE OF DISCIPLINE GENERATOR ---
     const handleExportWord = () => {
         if(!selectedEmp) return;
-        
         const oneYearAgo = new Date();
         oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-        
         const rollingIncidents = (selectedEmp.incidents || []).filter((inc:any) => {
-            const d = new Date(inc.date);
-            return d >= oneYearAgo;
+            const d = new Date(inc.date); return d >= oneYearAgo;
         }).sort((a:any, b:any) => new Date(a.date).getTime() - new Date(b.date).getTime());
         
         let activePoints = 0;
@@ -207,10 +193,8 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
         rollingIncidents.forEach((inc: any, index: number) => {
             const points = parseInt(inc.count) || 0;
             activePoints += points;
-            
             const d = new Date(inc.date);
             const formattedDate = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
-
             incidentListHTML += `<p style="margin-left: 40px; margin-bottom: 2px; font-family: 'Arial', sans-serif; font-size: 11pt;">${index + 1}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${formattedDate}</p>`;
         });
 
@@ -222,58 +206,11 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
 
         const nameParts = selectedEmp.name.split(' ');
         const formalName = nameParts.length > 1 ? `${nameParts[nameParts.length-1]}, ${nameParts[0]}` : selectedEmp.name;
-        
         const today = new Date();
         const reportDate = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
 
-        const header = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Notice of Discipline</title><style>
-            body { font-family: 'Arial', sans-serif; font-size: 11pt; line-height: 1.1; color: #000000; }
-            p { margin-top: 5px; margin-bottom: 5px; font-family: 'Arial', sans-serif; font-size: 11pt; }
-            .header { text-align: center; font-weight: bold; margin-bottom: 20px; text-transform: uppercase; font-family: 'Arial', sans-serif; }
-            .right-align { text-align: right; }
-            .bold { font-weight: bold; }
-            .schedule { margin-left: 40px; font-family: 'Arial', sans-serif; font-size: 11pt; }
-        </style></head><body>`;
-        
-        const content = `
-            <br>
-            <p>TO: <strong>${formalName}</strong></p>
-            <div class="header">
-                <p>MARTA ATTENDANCE PROGRAM<br>NOTICE OF DISCIPLINE</p>
-            </div>
-            <p style="text-align: right;">DATE: <strong>${reportDate}</strong></p>
-            <br>
-            <p>MARTA's Attendance Program states that an employee who accumulates excessive occurrences of absence within any twelve month period (rolling year) will be disciplined according to the following:</p>
-            <br>
-            <p class="schedule">Number of Occurrences&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Level of Discipline</p>
-            <p class="schedule">1-2&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;None</p>
-            <p class="schedule">3&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Verbal Warning</p>
-            <p class="schedule">4&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Written Warning</p>
-            <p class="schedule">5&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;* Final Written Warning Discharge</p>
-            <br>
-            <p>My records indicate that you have accumulated <strong>${activePoints} occurrences</strong> during the past rolling twelve months. The Occurrences are as follows:</p>
-            <br>
-            <p style="margin-left: 40px; font-weight:bold;">Occurrences</p>
-            ${incidentListHTML || '<p style="margin-left: 40px;">None recorded.</p>'}
-            <br>
-            <p>Therefore, in accordance with the schedule of progressive discipline, this is your <strong>${disciplineLevel}</strong> for excessive absenteeism under the rule.</p>
-            <br>
-            <p>Please be advised that your rate of absenteeism is not acceptable and YOUR corrective action is required. Additional occurrences will result in the progressive disciplinary action indicated above.</p>
-            <br>
-            <p>If you have a personal problem that is affecting your attendance, it is recommended that you call Humana, MARTA's Employee Assistance Program (EAP), at 1-800-448-4358. MARTA sincerely hopes that you will improve your attendance and that further discipline will not be necessary.</p>
-            <br><br>
-            <p class="header" style="border-top: 1px solid #000; padding-top: 5px; width: 200px; margin: auto;">ACKNOWLEDGEMENT</p>
-            <p>I acknowledge receipt of this Notice of Discipline and that I have been informed of the help available to me through MARTA's EAP and of potential for progressive discipline, up to and including discharge.</p>
-            <br><br><br>
-            <p>__________________________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; __________________________</p>
-            <p>Date &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Employee</p>
-            <br>
-            <p>__________________________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; __________________________</p>
-            <p>Date &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Foreman/Supervisor/Superintendent</p>
-            <br>
-            <p>__________________________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; __________________________</p>
-            <p>Date &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; General Foreman/Manager/General Superintendent</p>
-        </body></html>`;
+        const header = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Notice of Discipline</title><style>body { font-family: 'Arial', sans-serif; font-size: 11pt; line-height: 1.1; color: #000000; } p { margin-top: 5px; margin-bottom: 5px; font-family: 'Arial', sans-serif; font-size: 11pt; } .header { text-align: center; font-weight: bold; margin-bottom: 20px; text-transform: uppercase; font-family: 'Arial', sans-serif; } .right-align { text-align: right; } .bold { font-weight: bold; } .schedule { margin-left: 40px; font-family: 'Arial', sans-serif; font-size: 11pt; }</style></head><body>`;
+        const content = `<br><p>TO: <strong>${formalName}</strong></p><div class="header"><p>MARTA ATTENDANCE PROGRAM<br>NOTICE OF DISCIPLINE</p></div><p style="text-align: right;">DATE: <strong>${reportDate}</strong></p><br><p>MARTA's Attendance Program states that an employee who accumulates excessive occurrences of absence within any twelve month period (rolling year) will be disciplined according to the following:</p><br><p class="schedule">Number of Occurrences&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Level of Discipline</p><p class="schedule">1-2&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;None</p><p class="schedule">3&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Verbal Warning</p><p class="schedule">4&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Written Warning</p><p class="schedule">5&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;* Final Written Warning Discharge</p><br><p>My records indicate that you have accumulated <strong>${activePoints} occurrences</strong> during the past rolling twelve months. The Occurrences are as follows:</p><br><p style="margin-left: 40px; font-weight:bold;">Occurrences</p>${incidentListHTML || '<p style="margin-left: 40px;">None recorded.</p>'}<br><p>Therefore, in accordance with the schedule of progressive discipline, this is your <strong>${disciplineLevel}</strong> for excessive absenteeism under the rule.</p><br><p>Please be advised that your rate of absenteeism is not acceptable and YOUR corrective action is required. Additional occurrences will result in the progressive disciplinary action indicated above.</p><br><p>If you have a personal problem that is affecting your attendance, it is recommended that you call Humana, MARTA's Employee Assistance Program (EAP), at 1-800-448-4358. MARTA sincerely hopes that you will improve your attendance and that further discipline will not be necessary.</p><br><br><p class="header" style="border-top: 1px solid #000; padding-top: 5px; width: 200px; margin: auto;">ACKNOWLEDGEMENT</p><p>I acknowledge receipt of this Notice of Discipline and that I have been informed of the help available to me through MARTA's EAP and of potential for progressive discipline, up to and including discharge.</p><br><br><br><p>__________________________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; __________________________</p><p>Date &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Employee</p><br><p>__________________________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; __________________________</p><p>Date &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Foreman/Supervisor/Superintendent</p><br><p>__________________________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; __________________________</p><p>Date &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; General Foreman/Manager/General Superintendent</p></body></html>`;
 
         const blob = new Blob(['\ufeff', header + content], { type: 'application/msword' });
         saveAs(blob, `${selectedEmp.name.replace(' ','_')}_Notice.doc`);
@@ -282,9 +219,9 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
 
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
-            <div className="flex justify-between items-end mb-6">
+            <div className="flex justify-between items-end mb-6 flex-wrap gap-2">
                 <div><h2 className="text-3xl font-black text-[#002d72] italic uppercase tracking-tighter">Attendance Tracker</h2><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Incident Dashboard & Logs</p></div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                     <div className="bg-white border rounded-lg p-1 flex">
                         <button onClick={()=>setViewMode('dashboard')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded transition-all ${viewMode==='dashboard'?'bg-[#002d72] text-white shadow':'text-slate-400 hover:text-[#002d72]'}`}>Dashboard</button>
                         <button onClick={()=>setViewMode('log')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded transition-all ${viewMode==='log'?'bg-[#002d72] text-white shadow':'text-slate-400 hover:text-[#002d72]'}`}>Master Log</button>
@@ -307,7 +244,6 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                                 <button onClick={()=>setSelectedEmp(null)} className="text-2xl text-slate-300 hover:text-slate-500">✕</button>
                             </div>
                         </div>
-                        
                         <div className="p-6 overflow-y-auto">
                             <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 mb-6">
                                 <h4 className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-3">Log New Incident</h4>
@@ -322,10 +258,9 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                                 <input className="w-full p-2 border rounded font-bold text-xs mb-3" placeholder="Notes..." value={incData.notes} onChange={e=>setIncData({...incData, notes:e.target.value})} />
                                 <button onClick={handleLogIncident} className="w-full py-2 bg-[#002d72] text-white rounded font-black text-xs hover:bg-[#ef7c00]">Add Record</button>
                             </div>
-
                             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Incident History</h4>
-                            <div className="border rounded-xl overflow-hidden">
-                                <table className="w-full text-left text-xs">
+                            <div className="border rounded-xl overflow-hidden overflow-x-auto">
+                                <table className="w-full text-left text-xs min-w-[400px]">
                                     <thead className="bg-slate-50 border-b font-black text-slate-500"><tr><th className="p-3">Date</th><th className="p-3">Type</th><th className="p-3 text-center">Pts</th><th className="p-3">Notes</th><th className="p-3 text-center">Action</th></tr></thead>
                                     <tbody className="divide-y">
                                         {selectedEmp.incidents && selectedEmp.incidents.length > 0 ? selectedEmp.incidents.slice().reverse().map((inc: any, i: number) => {
@@ -356,26 +291,10 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Incidents by Type</p><div className="space-y-1">{Object.entries(stats.typeCounts).slice(0,3).map(([k,v]) => (<div key={k} onClick={()=>jumpToLog(k)} className="flex justify-between text-xs font-bold text-slate-600 cursor-pointer hover:text-[#ef7c00]"><span>{k}</span><span>{v}</span></div>))}</div></div>
                     </div>
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Monthly Incident Summary</h3></div><table className="w-full text-left text-xs"><thead className="text-slate-400 font-black uppercase bg-white border-b"><tr><th className="p-3">Month</th><th className="p-3 text-right">Sick</th><th className="p-3 text-right">FMLA</th><th className="p-3 text-right">No Show</th><th className="p-3 text-right">Total</th></tr></thead><tbody className="divide-y divide-slate-50">{stats.monthNames.map(month => { const data = stats.monthlyCounts[month] || {}; if (!data.Total) return null; return (<tr key={month}><td className="p-3 font-bold text-slate-700">{month}</td><td className="p-3 text-right font-mono text-orange-600">{data['Sick'] || 0}</td><td className="p-3 text-right font-mono text-blue-600">{data['FMLA'] || 0}</td><td className="p-3 text-right font-mono text-red-600">{(data['No Call/No Show'] || 0) + (data['Failure to Report'] || 0)}</td><td className="p-3 text-right font-black">{data.Total || 0}</td></tr>); })}</tbody></table></div>
-                        
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"><div className="p-4 border-b bg-slate-50"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Monthly Incident Summary</h3></div><div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="text-slate-400 font-black uppercase bg-white border-b"><tr><th className="p-3">Month</th><th className="p-3 text-right">Sick</th><th className="p-3 text-right">FMLA</th><th className="p-3 text-right">No Show</th><th className="p-3 text-right">Total</th></tr></thead><tbody className="divide-y divide-slate-50">{stats.monthNames.map(month => { const data = stats.monthlyCounts[month] || {}; if (!data.Total) return null; return (<tr key={month}><td className="p-3 font-bold text-slate-700">{month}</td><td className="p-3 text-right font-mono text-orange-600">{data['Sick'] || 0}</td><td className="p-3 text-right font-mono text-blue-600">{data['FMLA'] || 0}</td><td className="p-3 text-right font-mono text-red-600">{(data['No Call/No Show'] || 0) + (data['Failure to Report'] || 0)}</td><td className="p-3 text-right font-black">{data.Total || 0}</td></tr>); })}</tbody></table></div></div>
                         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col h-[400px]">
-                            <div className="p-4 border-b bg-slate-50 flex justify-between items-center">
-                                <h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Employee Roster</h3>
-                                <input type="text" placeholder="Search Name..." className="text-xs p-1 border rounded w-32 font-bold" value={rosterSearch} onChange={e=>setRosterSearch(e.target.value)} />
-                            </div>
-                            <div className="overflow-y-auto flex-grow">
-                                <table className="w-full text-left text-xs">
-                                    <thead className="text-slate-400 font-black uppercase bg-white border-b sticky top-0"><tr><th className="p-3">Employee Name</th><th className="p-3 text-right">Count</th></tr></thead>
-                                    <tbody className="divide-y divide-slate-50">
-                                        {filteredRoster.map(emp => (
-                                            <tr key={emp.id} onClick={() => setSelectedEmp(emp)} className="hover:bg-blue-50 transition-colors cursor-pointer">
-                                                <td className="p-3 font-bold text-slate-700">{emp.name}</td>
-                                                <td className={`p-3 text-right font-black ${emp.totalOccurrences > 5 ? 'text-red-500' : 'text-slate-800'}`}>{emp.totalOccurrences}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                            <div className="p-4 border-b bg-slate-50 flex justify-between items-center"><h3 className="text-xs font-black text-[#002d72] uppercase tracking-widest">Employee Roster</h3><input type="text" placeholder="Search Name..." className="text-xs p-1 border rounded w-32 font-bold" value={rosterSearch} onChange={e=>setRosterSearch(e.target.value)} /></div>
+                            <div className="overflow-y-auto flex-grow"><table className="w-full text-left text-xs"><thead className="text-slate-400 font-black uppercase bg-white border-b sticky top-0"><tr><th className="p-3">Employee Name</th><th className="p-3 text-right">Count</th></tr></thead><tbody className="divide-y divide-slate-50">{filteredRoster.map(emp => (<tr key={emp.id} onClick={() => setSelectedEmp(emp)} className="hover:bg-blue-50 transition-colors cursor-pointer"><td className="p-3 font-bold text-slate-700">{emp.name}</td><td className={`p-3 text-right font-black ${emp.totalOccurrences > 5 ? 'text-red-500' : 'text-slate-800'}`}>{emp.totalOccurrences}</td></tr>))}</tbody></table></div>
                         </div>
                     </div>
                 </div>
@@ -383,13 +302,15 @@ const PersonnelManager = ({ showToast }: { showToast: (msg: string, type: 'succe
 
             {viewMode === 'log' && (
                 <div className="bg-white rounded-2xl shadow-lg border border-slate-200 flex-grow overflow-hidden flex flex-col">
-                    <div className="p-4 border-b flex gap-4 bg-slate-50">
-                        <input className="p-2 border rounded font-bold text-xs flex-grow" placeholder="Search Employee..." value={logFilter.search} onChange={e=>setLogFilter({...logFilter, search:e.target.value})} />
+                    <div className="p-4 border-b flex gap-4 bg-slate-50 flex-wrap">
+                        <input className="p-2 border rounded font-bold text-xs flex-grow min-w-[150px]" placeholder="Search Employee..." value={logFilter.search} onChange={e=>setLogFilter({...logFilter, search:e.target.value})} />
                         <select className="p-2 border rounded font-bold text-xs" value={logFilter.type} onChange={e=>setLogFilter({...logFilter, type:e.target.value})}><option value="All">All Types</option><option>Sick</option><option>FMLA</option><option>No Call/No Show</option></select>
                         <select className="p-2 border rounded font-bold text-xs" value={logFilter.sort} onChange={e=>setLogFilter({...logFilter, sort:e.target.value})}><option value="desc">Newest First</option><option value="asc">Oldest First</option></select>
                     </div>
-                    <div className="bg-slate-50 border-b p-3 grid grid-cols-12 gap-2 text-[9px] font-black uppercase text-slate-400 tracking-widest"><div className="col-span-3">Employee Name</div><div className="col-span-2">Incident Type</div><div className="col-span-2">Date</div><div className="col-span-1 text-center">Count</div><div className="col-span-1 text-center">Doc?</div><div className="col-span-2">Notes</div><div className="col-span-1 text-center">Action</div></div>
-                    <div className="overflow-y-auto flex-grow divide-y divide-slate-100">{filteredLog.length === 0 ? <div className="p-10 text-center text-slate-300 italic">No attendance records found.</div> : filteredLog.map((log, i) => (<div key={i} className="grid grid-cols-12 gap-2 p-3 items-center hover:bg-blue-50 transition-colors text-xs"><div className="col-span-3 font-bold text-[#002d72]">{log.employeeName}</div><div className="col-span-2 font-medium text-slate-600"><span className={`px-2 py-0.5 rounded text-[10px] uppercase font-black ${log.type==='Sick'?'bg-orange-100 text-orange-700':log.type==='FMLA'?'bg-blue-100 text-blue-700':'bg-red-100 text-red-700'}`}>{log.type}</span></div><div className="col-span-2 font-mono text-slate-500">{log.date}</div><div className="col-span-1 text-center font-black">{log.count}</div><div className="col-span-1 text-center">{log.docReceived ? '✅' : '❌'}</div><div className="col-span-2 text-slate-500 truncate italic">{log.notes || '-'}</div><div className="col-span-1 text-center"><button onClick={() => handleDeleteIncident(log.employeeId, log)} className="text-red-400 hover:text-red-600 font-bold">🗑️</button></div></div>))}</div>
+                    <div className="overflow-x-auto flex-grow">
+                        <div className="min-w-[700px] bg-slate-50 border-b p-3 grid grid-cols-12 gap-2 text-[9px] font-black uppercase text-slate-400 tracking-widest"><div className="col-span-3">Employee Name</div><div className="col-span-2">Incident Type</div><div className="col-span-2">Date</div><div className="col-span-1 text-center">Count</div><div className="col-span-1 text-center">Doc?</div><div className="col-span-2">Notes</div><div className="col-span-1 text-center">Action</div></div>
+                        <div className="min-w-[700px] divide-y divide-slate-100">{filteredLog.length === 0 ? <div className="p-10 text-center text-slate-300 italic">No attendance records found.</div> : filteredLog.map((log, i) => (<div key={i} className="grid grid-cols-12 gap-2 p-3 items-center hover:bg-blue-50 transition-colors text-xs"><div className="col-span-3 font-bold text-[#002d72]">{log.employeeName}</div><div className="col-span-2 font-medium text-slate-600"><span className={`px-2 py-0.5 rounded text-[10px] uppercase font-black ${log.type==='Sick'?'bg-orange-100 text-orange-700':log.type==='FMLA'?'bg-blue-100 text-blue-700':'bg-red-100 text-red-700'}`}>{log.type}</span></div><div className="col-span-2 font-mono text-slate-500">{log.date}</div><div className="col-span-1 text-center font-black">{log.count}</div><div className="col-span-1 text-center">{log.docReceived ? '✅' : '❌'}</div><div className="col-span-2 text-slate-500 truncate italic">{log.notes || '-'}</div><div className="col-span-1 text-center"><button onClick={() => handleDeleteIncident(log.employeeId, log)} className="text-red-400 hover:text-red-600 font-bold">🗑️</button></div></div>))}</div>
+                    </div>
                 </div>
             )}
 
@@ -571,7 +492,7 @@ const BusDetailView = ({ bus, onClose, showToast }: { bus: any; onClose: () => v
     };
 
     if (showHistory) return (<div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-lg h-[600px] flex flex-col animate-in zoom-in-95"><div className="flex justify-between items-center mb-4 border-b pb-4 font-black text-[#002d72] uppercase"><span>History: #{bus.number}</span><button onClick={()=>setShowHistory(false)} className="text-xs text-slate-400">Back</button></div><div className="flex-grow overflow-y-auto space-y-3">{historyLogs.map(l => (<div key={l.id} className="p-3 bg-slate-50 rounded-lg border border-slate-100 relative group"><div className="flex justify-between text-[8px] font-black uppercase text-slate-400 mb-1"><span>{l.action}</span><span>{formatTime(l.timestamp)}</span></div><p className="text-xs font-bold text-slate-700 whitespace-pre-wrap leading-tight">{l.details}</p><button onClick={() => handleDeleteLog(l.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity text-xs font-bold">DELETE</button></div>))}</div></div>);
-    if (isEditing) return (<div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-2xl animate-in zoom-in-95"><h3 className="text-2xl font-black text-[#002d72] mb-6 uppercase italic">Edit Bus #{bus.number}</h3><div className="grid grid-cols-2 gap-4 mb-4"><select className="p-3 bg-slate-50 border-2 rounded-lg font-bold" value={editData.status} onChange={e=>setEditData({...editData, status:e.target.value})}><option value="Active">Ready</option><option value="In Shop">In Shop</option><option value="Engine">Engine</option><option value="Body Shop">Body Shop</option><option value="Vendor">Vendor</option><option value="Brakes">Brakes</option><option value="Safety">Safety</option></select><input className="p-3 bg-slate-50 border-2 rounded-lg font-bold" value={editData.location} onChange={e=>setEditData({...editData, location:e.target.value})} placeholder="Location" /></div><textarea className="w-full p-3 bg-slate-50 border-2 rounded-lg h-24 mb-4 font-bold" value={editData.notes} onChange={e=>setEditData({...editData, notes:e.target.value})} placeholder="Maintenance Notes" /><div className="grid grid-cols-3 gap-4 mb-6 text-[9px] font-black uppercase text-slate-400"><div>OOS Date<input type="date" className="w-full p-2 border rounded mt-1 font-bold text-slate-900" value={editData.oosStartDate} onChange={e=>setEditData({...editData, oosStartDate:e.target.value})} /></div><div>Exp Return<input type="date" className="w-full p-2 border rounded mt-1 font-bold text-slate-900" value={editData.expectedReturnDate} onChange={e=>setEditData({...editData, expectedReturnDate:e.target.value})} /></div><div>Act Return<input type="date" className="w-full p-2 border rounded mt-1 font-bold text-slate-900" value={editData.actualReturnDate} onChange={e=>setEditData({...editData, actualReturnDate:e.target.value})} /></div></div><div className="flex gap-4"><button onClick={()=>setIsEditing(false)} className="w-1/2 py-3 bg-slate-100 rounded-xl font-black uppercase text-xs">Cancel</button><button onClick={handleSave} className="w-1/2 py-3 bg-[#002d72] text-white rounded-xl font-black uppercase text-xs shadow-lg">Save Changes</button></div></div>);
+    if (isEditing) return (<div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-2xl animate-in zoom-in-95"><h3 className="text-2xl font-black text-[#002d72] mb-6 uppercase italic">Edit Bus #{bus.number}</h3><div className="grid grid-cols-2 gap-4 mb-4"><select className="p-3 bg-slate-50 border-2 rounded-lg font-bold" value={editData.status} onChange={e=>setEditData({...editData, status:e.target.value})}><option value="Active">Ready</option><option value="On Hold">On Hold</option><option value="In Shop">In Shop</option><option value="Engine">Engine</option><option value="Body Shop">Body Shop</option><option value="Vendor">Vendor</option><option value="Brakes">Brakes</option><option value="Safety">Safety</option></select><input className="p-3 bg-slate-50 border-2 rounded-lg font-bold" value={editData.location} onChange={e=>setEditData({...editData, location:e.target.value})} placeholder="Location" /></div><textarea className="w-full p-3 bg-slate-50 border-2 rounded-lg h-24 mb-4 font-bold" value={editData.notes} onChange={e=>setEditData({...editData, notes:e.target.value})} placeholder="Maintenance Notes" /><div className="grid grid-cols-3 gap-4 mb-6 text-[9px] font-black uppercase text-slate-400"><div>OOS Date<input type="date" className="w-full p-2 border rounded mt-1 font-bold text-slate-900" value={editData.oosStartDate} onChange={e=>setEditData({...editData, oosStartDate:e.target.value})} /></div><div>Exp Return<input type="date" className="w-full p-2 border rounded mt-1 font-bold text-slate-900" value={editData.expectedReturnDate} onChange={e=>setEditData({...editData, expectedReturnDate:e.target.value})} /></div><div>Act Return<input type="date" className="w-full p-2 border rounded mt-1 font-bold text-slate-900" value={editData.actualReturnDate} onChange={e=>setEditData({...editData, actualReturnDate:e.target.value})} /></div></div><div className="flex gap-4"><button onClick={()=>setIsEditing(false)} className="w-1/2 py-3 bg-slate-100 rounded-xl font-black uppercase text-xs">Cancel</button><button onClick={handleSave} className="w-1/2 py-3 bg-[#002d72] text-white rounded-xl font-black uppercase text-xs shadow-lg">Save Changes</button></div></div>);
     return (
         <div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-2xl animate-in zoom-in-95">
             <div className="flex justify-between items-start mb-6 border-b pb-4">
